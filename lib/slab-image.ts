@@ -50,11 +50,11 @@ export function resizeBox(box: Box, dw: number, dh: number): Box {
   };
 }
 
-// JPEG photos stay JPEG: a PNG of a 12MP phone photo is several times larger
-// and can blow past upload limits. Anything else may have transparency, so it
-// becomes PNG.
+// Camera photos (JPEG, HEIC) export as JPEG: a PNG of a 12MP phone photo is
+// several times larger and can blow past upload limits. Anything else may
+// have transparency, so it becomes PNG.
 export function exportType(sourceType: string) {
-  return sourceType === "image/jpeg" ? "image/jpeg" : "image/png";
+  return /^image\/(jpeg|heic)$/.test(sourceType) ? "image/jpeg" : "image/png";
 }
 
 // Re-encoding through a canvas also drops the photo's EXIF metadata,

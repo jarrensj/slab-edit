@@ -5,6 +5,7 @@ import { Button } from "@/components/Button";
 import { ExportActions } from "@/components/ExportActions";
 import { WatermarkLayer } from "@/components/WatermarkLayer";
 import { WatermarkSheet } from "@/components/WatermarkSheet";
+import { heicToJpeg, isHeic, isImageFile } from "@/lib/heic";
 import {
   type Box,
   exportType,
@@ -15,7 +16,7 @@ import {
 } from "@/lib/slab-image";
 import { hasWatermark, useWatermark } from "@/lib/watermark";
 
-type Photo = { url: string; name: string; type: string };
+type Photo = { url: string; name: string; type: string; file: File };
 
 type DragState = {
   mode: "move" | "resize";
@@ -41,6 +42,7 @@ export function SlabEditor() {
   const [photo, setPhoto] = useState<Photo | null>(null);
   const [loadedUrl, setLoadedUrl] = useState<string | null>(null);
   const [failedUrl, setFailedUrl] = useState<string | null>(null);
+  const [convertingUrl, setConvertingUrl] = useState<string | null>(null);
   const [boxes, setBoxes] = useState<Box[]>([]);
   const [isDragging, setIsDragging] = useState(false);
   const [watermarkOn, setWatermarkOn] = useState(true);
@@ -50,24 +52,28 @@ export function SlabEditor() {
   const stageRef = useRef<HTMLDivElement>(null);
   const imgRef = useRef<HTMLImageElement>(null);
   const dragRef = useRef<DragState | null>(null);
+  const photoRef = useRef<Photo | null>(null);
 
   const isLoaded = !!photo && loadedUrl === photo.url;
   const isFailed = !!photo && failedUrl === photo.url;
+  const isConverting = !!photo && convertingUrl === photo.url;
   const activeWatermark =
     watermarkOn && hasWatermark(watermark) ? watermark : null;
 
   const ingestImageFile = useCallback((file: File) => {
-    if (!file.type.startsWith("image/")) return;
+    if (!isImageFile(file)) return;
     dragRef.current = null;
     setPhoto({
       url: URL.createObjectURL(file),
       name: file.name,
-      type: file.type,
+      type: isHeic(file) ? "image/heic" : file.type,
+      file,
     });
     setBoxes([newBox(0)]);
   }, []);
 
   useEffect(() => {
+    photoRef.current = photo;
     if (!photo) return;
     return () => URL.revokeObjectURL(photo.url);
   }, [photo]);
@@ -85,9 +91,9 @@ export function SlabEditor() {
       const items = e.clipboardData?.items;
       if (!items) return;
       for (const item of items) {
-        if (item.kind === "file" && item.type.startsWith("image/")) {
+        if (item.kind === "file") {
           const file = item.getAsFile();
-          if (!file) continue;
+          if (!file || !isImageFile(file)) continue;
           e.preventDefault();
           ingestImageFile(file);
           return;
@@ -125,7 +131,7 @@ export function SlabEditor() {
       dragDepth = 0;
       setIsDragging(false);
       const files = Array.from(e.dataTransfer?.files ?? []);
-      const image = files.find((f) => f.type.startsWith("image/"));
+      const image = files.find(isImageFile);
       if (image) ingestImageFile(image);
     }
     window.addEventListener("dragenter", onDragEnter);
@@ -159,6 +165,29 @@ export function SlabEditor() {
     },
     [photo, boxes, activeWatermark],
   );
+
+  // The browser gets the first try at decoding, so Safari shows HEIC
+  // natively; only when that fails is the photo converted to JPEG here.
+  async function onPhotoError(current: Photo) {
+    if (current.type !== "image/heic") {
+      setFailedUrl(current.url);
+      return;
+    }
+    setConvertingUrl(current.url);
+    try {
+      const jpeg = await heicToJpeg(current.file);
+      // A different photo may have been picked while this one converted.
+      if (photoRef.current !== current) return;
+      setPhoto({
+        ...current,
+        url: URL.createObjectURL(jpeg),
+        type: "image/jpeg",
+      });
+    } catch {
+      setConvertingUrl(null);
+      setFailedUrl(current.url);
+    }
+  }
 
   function onFileChange(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
@@ -231,6 +260,8 @@ export function SlabEditor() {
     replaceBox(e.shiftKey ? resizeBox(box, dx, dy) : moveBox(box, dx, dy));
   }
 
+  // iOS hands file inputs a JPEG copy of HEIC photos unless the page
+  // explicitly accepts HEIC, so this stays image/* rather than listing .heic.
   const fileInput = (
     <input
       ref={fileInputRef}
@@ -290,11 +321,19 @@ export function SlabEditor() {
 
   return (
     <div className="flex w-full flex-col items-center gap-4">
+      {isConverting && (
+        <p
+          role="status"
+          className="flex h-48 w-full max-w-xl animate-pulse items-center justify-center rounded-lg border border-foreground/20 text-foreground/60"
+        >
+          Converting HEIC photo…
+        </p>
+      )}
       <div
         ref={stageRef}
         className={`relative select-none ${
           isDragging ? "ring-2 ring-foreground" : ""
-        }`}
+        } ${isConverting ? "hidden" : ""}`}
       >
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
@@ -302,7 +341,7 @@ export function SlabEditor() {
           src={photo.url}
           alt="Slab photo"
           onLoad={() => setLoadedUrl(photo.url)}
-          onError={() => setFailedUrl(photo.url)}
+          onError={() => onPhotoError(photo)}
           draggable={false}
           className="block max-h-[60dvh] max-w-full rounded-lg [-webkit-touch-callout:none]"
         />
@@ -354,47 +393,47 @@ export function SlabEditor() {
           ))}
       </div>
 
-      {/* TODO: once HEIC support lands, hide this row while a photo converts,
-          like the photo itself. */}
-      <div className="flex items-center justify-center">
-        {hasWatermark(watermark) ? (
-          <>
-            <label className="flex min-h-11 cursor-pointer items-center gap-2 px-1 text-sm">
-              <input
-                type="checkbox"
-                checked={watermarkOn}
-                onChange={(e) => setWatermarkOn(e.target.checked)}
-                className="size-5 cursor-pointer accent-foreground"
-              />
-              Watermark
-              <span className="max-w-36 truncate text-foreground/60">
-                “{watermark.text}”
-              </span>
-            </label>
+      {!isConverting && (
+        <div className="flex items-center justify-center">
+          {hasWatermark(watermark) ? (
+            <>
+              <label className="flex min-h-11 cursor-pointer items-center gap-2 px-1 text-sm">
+                <input
+                  type="checkbox"
+                  checked={watermarkOn}
+                  onChange={(e) => setWatermarkOn(e.target.checked)}
+                  className="size-5 cursor-pointer accent-foreground"
+                />
+                Watermark
+                <span className="max-w-36 truncate text-foreground/60">
+                  “{watermark.text}”
+                </span>
+              </label>
+              <button
+                type="button"
+                onClick={() => setWatermarkSheetOpen(true)}
+                className={LINK_CLASS}
+              >
+                Edit
+              </button>
+            </>
+          ) : (
             <button
               type="button"
               onClick={() => setWatermarkSheetOpen(true)}
               className={LINK_CLASS}
             >
-              Edit
+              + Add a watermark
             </button>
-          </>
-        ) : (
-          <button
-            type="button"
-            onClick={() => setWatermarkSheetOpen(true)}
-            className={LINK_CLASS}
-          >
-            + Add a watermark
-          </button>
-        )}
-      </div>
+          )}
+        </div>
+      )}
 
       {isFailed ? (
         <p role="alert" className="text-sm text-red-600 dark:text-red-400">
           Couldn&apos;t open that photo. Try saving it as a JPG or PNG first.
         </p>
-      ) : (
+      ) : isConverting ? null : (
         <p className="max-w-md text-sm text-foreground/60">
           Drag the black box over the serial number, and drag its corner to
           resize it. Add more boxes for anything else you want hidden.
