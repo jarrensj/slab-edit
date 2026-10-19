@@ -7,6 +7,9 @@ import {
   MAX_WATERMARK_TEXT,
   type Watermark,
   drawWatermark,
+  hasWatermark,
+  loadLogo,
+  logoFromFile,
   saveWatermark,
   useWatermark,
 } from "@/lib/watermark";
@@ -51,9 +54,11 @@ function WatermarkPreview({
     const canvas = canvasRef.current;
     const ctx = canvas?.getContext("2d");
     if (!canvas || !ctx || !ready) return;
+    let cancelled = false;
+    let logo: HTMLImageElement | null | undefined;
 
     function draw() {
-      if (!canvas!.clientWidth) return;
+      if (cancelled || logo === undefined || !canvas!.clientWidth) return;
       const dpr = window.devicePixelRatio || 1;
       const width = Math.round(canvas!.clientWidth * dpr);
       const height = Math.round(canvas!.clientHeight * dpr);
@@ -79,16 +84,22 @@ function WatermarkPreview({
         ctx!.fillStyle = gradient;
         ctx!.fillRect(0, 0, w, h);
       }
-      drawWatermark(ctx!, w, h, watermark);
+      drawWatermark(ctx!, w, h, watermark, logo);
       ctx!.restore();
     }
 
-    draw();
+    loadLogo(watermark).then((loaded) => {
+      logo = loaded;
+      draw();
+    });
     // The sheet is still closed (zero-sized) when this first runs, so draw
     // again once the canvas has a size.
     const observer = new ResizeObserver(draw);
     observer.observe(canvas);
-    return () => observer.disconnect();
+    return () => {
+      cancelled = true;
+      observer.disconnect();
+    };
   }, [ready, img, watermark]);
 
   return <canvas ref={canvasRef} aria-hidden className="h-48 w-full" />;
@@ -107,6 +118,9 @@ export function WatermarkSheet({
   photoUrl: string | null;
 }) {
   const dialogRef = useRef<HTMLDialogElement>(null);
+  const logoInputRef = useRef<HTMLInputElement>(null);
+  const [addingLogo, setAddingLogo] = useState(false);
+  const [logoError, setLogoError] = useState<string | null>(null);
   const watermark = useWatermark();
 
   useEffect(() => {
@@ -120,6 +134,21 @@ export function WatermarkSheet({
     saveWatermark({ ...watermark, ...changes });
   }
 
+  async function onLogoChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    setLogoError(null);
+    setAddingLogo(true);
+    try {
+      update({ image: await logoFromFile(file) });
+    } catch {
+      setLogoError("Couldn't open that image. Try a PNG or JPG.");
+    } finally {
+      setAddingLogo(false);
+    }
+  }
+
   return (
     <dialog
       ref={dialogRef}
@@ -129,7 +158,7 @@ export function WatermarkSheet({
         if (e.target === e.currentTarget) onClose();
       }}
       aria-labelledby="watermark-title"
-      className="mx-0 mt-auto mb-0 max-h-[90dvh] w-full max-w-none rounded-t-2xl bg-background p-0 text-foreground backdrop:bg-black/60 sm:m-auto sm:max-w-md sm:rounded-2xl"
+      className="mx-0 mt-auto mb-0 max-h-[90dvh] w-full max-w-none overflow-y-auto rounded-t-2xl bg-background p-0 text-foreground backdrop:bg-black/60 sm:m-auto sm:max-w-md sm:rounded-2xl"
     >
       <div className="flex flex-col gap-4 p-4 pb-[max(1rem,env(safe-area-inset-bottom))] text-left">
         <div>
@@ -137,8 +166,8 @@ export function WatermarkSheet({
             Watermark
           </h2>
           <p className="text-sm text-foreground/60">
-            Saved on this device and added to every photo you save. You can
-            switch it off for a single photo in the editor.
+            Text, a logo, or both. Saved on this device and added to every
+            photo you save; you can switch it off for a single photo.
           </p>
         </div>
 
@@ -157,6 +186,48 @@ export function WatermarkSheet({
             className="h-11 rounded-lg border border-foreground/20 bg-transparent px-3 text-base outline-sky-500 focus-visible:outline-2"
           />
         </label>
+
+        <div className="flex flex-col gap-1.5">
+          <span className="text-sm font-medium">Logo</span>
+          <div className="flex items-center gap-2">
+            {watermark.image && (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={watermark.image}
+                alt="Your logo"
+                className="size-11 shrink-0 rounded-lg border border-foreground/20 bg-foreground/5 object-contain p-1"
+              />
+            )}
+            <Button
+              onClick={() => logoInputRef.current?.click()}
+              disabled={addingLogo}
+              className="flex-1"
+            >
+              {addingLogo
+                ? "Adding…"
+                : watermark.image
+                  ? "Replace logo"
+                  : "Upload a logo"}
+            </Button>
+            {watermark.image && (
+              <Button onClick={() => update({ image: null })} className="flex-1">
+                Remove logo
+              </Button>
+            )}
+          </div>
+          {logoError && (
+            <p role="alert" className="text-sm text-red-600 dark:text-red-400">
+              {logoError}
+            </p>
+          )}
+          <input
+            ref={logoInputRef}
+            type="file"
+            accept="image/*"
+            className="hidden"
+            onChange={onLogoChange}
+          />
+        </div>
 
         <label className="flex flex-col gap-1.5">
           <span className="flex justify-between text-sm font-medium">
@@ -201,7 +272,7 @@ export function WatermarkSheet({
         <div className="grid grid-cols-2 gap-2">
           <Button
             onClick={() => saveWatermark(DEFAULT_WATERMARK)}
-            disabled={!watermark.text}
+            disabled={!hasWatermark(watermark)}
           >
             Remove
           </Button>
