@@ -21,7 +21,12 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
     <html lang="en" className={`${geistSans.variable} ${geistMono.variable}`}>
-      <body>{children}</body>
+      <body>
+        {children}
+        <footer className="fixed inset-x-0 bottom-0 p-4 text-center">
+          We don&apos;t upload your photos anywhere.
+        </footer>
+      </body>
     </html>
   );
 }
