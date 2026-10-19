@@ -24,6 +24,18 @@ cookies/tracking — update the Terms of Service and Privacy Policy to reflect i
 those pages don't exist in the repo yet or live elsewhere, flag the needed update in the PR's
 Deployment Notes instead of silently shipping the feature.
 
+## Design for mobile web too
+
+Every page and component must work well on a phone browser, not just desktop. Treat mobile as a
+first-class target in the same PR — never a follow-up.
+
+- Check every UI change at phone width (~375px) as well as desktop: no horizontal scroll, and
+  nothing hidden behind the browser's toolbars.
+- Touch targets are at least 44×44px. Anything draggable works with touch — put `touch-none` on the
+  drag target so the page doesn't scroll instead.
+- Text inputs are at least 16px, so iOS Safari doesn't zoom in on focus.
+- Prefer `dvh` over `vh`, and respect safe-area insets for anything pinned to a screen edge.
+
 ## Commit & PR guidelines
 
 - **One feature per PR — no coupling.** Each feature reviews, merges, and reverts independently. A
