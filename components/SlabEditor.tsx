@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Button } from "@/components/Button";
 import { ExportActions } from "@/components/ExportActions";
+import { WatermarkLayer } from "@/components/WatermarkLayer";
+import { WatermarkSheet } from "@/components/WatermarkSheet";
 import {
   type Box,
   exportType,
@@ -11,6 +13,7 @@ import {
   renderEdited,
   resizeBox,
 } from "@/lib/slab-image";
+import { hasWatermark, useWatermark } from "@/lib/watermark";
 
 type Photo = { url: string; name: string; type: string };
 
@@ -24,6 +27,9 @@ type DragState = {
 
 // Arrow keys nudge a box by 1% of the photo; with Shift they resize it.
 const KEY_STEP = 0.01;
+const LINK_CLASS =
+  "min-h-11 min-w-11 cursor-pointer touch-manipulation px-2 text-sm underline underline-offset-4";
+
 const ARROW_KEYS: Record<string, [number, number]> = {
   ArrowLeft: [-1, 0],
   ArrowRight: [1, 0],
@@ -37,6 +43,9 @@ export function SlabEditor() {
   const [failedUrl, setFailedUrl] = useState<string | null>(null);
   const [boxes, setBoxes] = useState<Box[]>([]);
   const [isDragging, setIsDragging] = useState(false);
+  const [watermarkOn, setWatermarkOn] = useState(true);
+  const [watermarkSheetOpen, setWatermarkSheetOpen] = useState(false);
+  const watermark = useWatermark();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const stageRef = useRef<HTMLDivElement>(null);
   const imgRef = useRef<HTMLImageElement>(null);
@@ -44,6 +53,8 @@ export function SlabEditor() {
 
   const isLoaded = !!photo && loadedUrl === photo.url;
   const isFailed = !!photo && failedUrl === photo.url;
+  const activeWatermark =
+    watermarkOn && hasWatermark(watermark) ? watermark : null;
 
   const ingestImageFile = useCallback((file: File) => {
     if (!file.type.startsWith("image/")) return;
@@ -130,15 +141,23 @@ export function SlabEditor() {
   }, [ingestImageFile]);
 
   // Copy asks for PNG; Download takes the photo's own export type.
+  // TODO: when the share-sheet PR's render cache lands, key it on
+  // activeWatermark too (it's the same object until the settings change), so
+  // Copy/Save never hand back a render with stale watermark settings.
   const getEditedBlob = useCallback(
     (type?: string): Promise<Blob> => {
       const img = imgRef.current;
       if (!photo || !img || !img.naturalWidth) {
         return Promise.reject(new Error("Photo isn't loaded yet"));
       }
-      return renderEdited(img, boxes, type ?? exportType(photo.type));
+      return renderEdited(
+        img,
+        boxes,
+        type ?? exportType(photo.type),
+        activeWatermark,
+      );
     },
-    [photo, boxes],
+    [photo, boxes, activeWatermark],
   );
 
   function onFileChange(e: React.ChangeEvent<HTMLInputElement>) {
@@ -222,9 +241,17 @@ export function SlabEditor() {
     />
   );
 
+  const watermarkSheet = (
+    <WatermarkSheet
+      open={watermarkSheetOpen}
+      onClose={() => setWatermarkSheetOpen(false)}
+      photoUrl={isLoaded ? photo.url : null}
+    />
+  );
+
   if (!photo) {
     return (
-      <div className="w-full max-w-xl">
+      <div className="flex w-full max-w-xl flex-col items-center gap-2">
         <button
           type="button"
           onClick={() => fileInputRef.current?.click()}
@@ -244,7 +271,17 @@ export function SlabEditor() {
             …or click to choose one, or paste it (⌘V / Ctrl+V)
           </span>
         </button>
+        <button
+          type="button"
+          onClick={() => setWatermarkSheetOpen(true)}
+          className={`${LINK_CLASS} text-foreground/70`}
+        >
+          {hasWatermark(watermark)
+            ? `Watermark: “${watermark.text}” · Edit`
+            : "+ Add a watermark"}
+        </button>
         {fileInput}
+        {watermarkSheet}
       </div>
     );
   }
@@ -267,8 +304,11 @@ export function SlabEditor() {
           onLoad={() => setLoadedUrl(photo.url)}
           onError={() => setFailedUrl(photo.url)}
           draggable={false}
-          className="block max-h-[65dvh] max-w-full rounded-lg [-webkit-touch-callout:none]"
+          className="block max-h-[60dvh] max-w-full rounded-lg [-webkit-touch-callout:none]"
         />
+        {isLoaded && activeWatermark && (
+          <WatermarkLayer watermark={activeWatermark} />
+        )}
         {isLoaded &&
           boxes.map((box) => (
             <div
@@ -314,6 +354,42 @@ export function SlabEditor() {
           ))}
       </div>
 
+      {/* TODO: once HEIC support lands, hide this row while a photo converts,
+          like the photo itself. */}
+      <div className="flex items-center justify-center">
+        {hasWatermark(watermark) ? (
+          <>
+            <label className="flex min-h-11 cursor-pointer items-center gap-2 px-1 text-sm">
+              <input
+                type="checkbox"
+                checked={watermarkOn}
+                onChange={(e) => setWatermarkOn(e.target.checked)}
+                className="size-5 cursor-pointer accent-foreground"
+              />
+              Watermark
+              <span className="max-w-36 truncate text-foreground/60">
+                “{watermark.text}”
+              </span>
+            </label>
+            <button
+              type="button"
+              onClick={() => setWatermarkSheetOpen(true)}
+              className={LINK_CLASS}
+            >
+              Edit
+            </button>
+          </>
+        ) : (
+          <button
+            type="button"
+            onClick={() => setWatermarkSheetOpen(true)}
+            className={LINK_CLASS}
+          >
+            + Add a watermark
+          </button>
+        )}
+      </div>
+
       {isFailed ? (
         <p role="alert" className="text-sm text-red-600 dark:text-red-400">
           Couldn&apos;t open that photo. Try saving it as a JPG or PNG first.
@@ -342,6 +418,7 @@ export function SlabEditor() {
         )}
       </div>
       {fileInput}
+      {watermarkSheet}
     </div>
   );
 }
