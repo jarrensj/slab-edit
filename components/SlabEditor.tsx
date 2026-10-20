@@ -129,13 +129,17 @@ export function SlabEditor() {
     };
   }, [ingestImageFile]);
 
-  const getEditedBlob = useCallback((): Promise<Blob> => {
-    const img = imgRef.current;
-    if (!photo || !img || !img.naturalWidth) {
-      return Promise.reject(new Error("Photo isn't loaded yet"));
-    }
-    return renderEdited(img, boxes, exportType(photo.type));
-  }, [photo, boxes]);
+  // Copy asks for PNG; Download takes the photo's own export type.
+  const getEditedBlob = useCallback(
+    (type?: string): Promise<Blob> => {
+      const img = imgRef.current;
+      if (!photo || !img || !img.naturalWidth) {
+        return Promise.reject(new Error("Photo isn't loaded yet"));
+      }
+      return renderEdited(img, boxes, type ?? exportType(photo.type));
+    },
+    [photo, boxes],
+  );
 
   function onFileChange(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
