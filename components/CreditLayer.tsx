@@ -3,7 +3,7 @@
 import { useEffect, useRef } from "react";
 import { creditText, drawCredit } from "@/lib/credit";
 
-// Live preview of the "Made with …" credit over the photo, drawn with the same
+// Live preview of the site credit over the photo, drawn with the same
 // function as the export so what's on screen is what gets saved.
 export function CreditLayer() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
