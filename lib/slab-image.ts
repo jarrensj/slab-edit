@@ -1,3 +1,8 @@
+import {
+  CREDIT_BAND_FRACTION,
+  creditBandHeight,
+  drawCredit,
+} from "@/lib/credit";
 import { type Watermark, drawWatermark, loadLogo } from "@/lib/watermark";
 
 // A black box as fractions of the photo's width/height, so it is independent
@@ -66,15 +71,22 @@ export async function renderEdited(
   watermark: Watermark | null = null,
 ): Promise<Blob> {
   const logo = watermark ? await loadLogo(watermark) : null;
+  // The credit band adds rows under the photo, so it counts toward the
+  // canvas limit too.
+  const band =
+    CREDIT_BAND_FRACTION * Math.min(img.naturalWidth, img.naturalHeight);
   const scale = Math.min(
     1,
-    Math.sqrt(MAX_CANVAS_PIXELS / (img.naturalWidth * img.naturalHeight)),
+    Math.sqrt(
+      MAX_CANVAS_PIXELS / (img.naturalWidth * (img.naturalHeight + band)),
+    ),
   );
   const width = Math.floor(img.naturalWidth * scale);
   const height = Math.floor(img.naturalHeight * scale);
+  const bandHeight = creditBandHeight(width, height);
   const canvas = document.createElement("canvas");
   canvas.width = width;
-  canvas.height = height;
+  canvas.height = height + bandHeight;
   const ctx = canvas.getContext("2d");
   if (!ctx) throw new Error("Couldn't render image");
 
@@ -91,6 +103,8 @@ export async function renderEdited(
     const y1 = Math.ceil((box.y + box.h) * height);
     ctx.fillRect(x0, y0, x1 - x0, y1 - y0);
   }
+  // Last, so it also covers any tiled watermark that spilled past the photo.
+  drawCredit(ctx, height, width, bandHeight);
 
   return new Promise((resolve, reject) => {
     canvas.toBlob(
