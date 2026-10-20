@@ -1,3 +1,5 @@
+import { type Watermark, drawWatermark } from "@/lib/watermark";
+
 // A black box as fractions of the photo's width/height, so it is independent
 // of how large the preview renders and maps straight onto the full-size
 // export.
@@ -61,6 +63,7 @@ export function renderEdited(
   img: HTMLImageElement,
   boxes: Box[],
   type: string,
+  watermark: Watermark | null = null,
 ): Promise<Blob> {
   const scale = Math.min(
     1,
@@ -75,6 +78,8 @@ export function renderEdited(
   if (!ctx) return Promise.reject(new Error("Couldn't render image"));
 
   ctx.drawImage(img, 0, 0, width, height);
+  // Under the boxes, so a box always covers what it hides completely.
+  if (watermark) drawWatermark(ctx, width, height, watermark);
   ctx.fillStyle = "#000";
   for (const box of boxes) {
     // Round outward so no anti-aliased sliver of the serial survives at the
