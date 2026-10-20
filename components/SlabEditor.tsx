@@ -18,6 +18,7 @@ import {
 } from "@/components/WatermarkSheet";
 import {
   type Box,
+  editedName,
   exportType,
   moveBox,
   newBox,
@@ -394,8 +395,6 @@ export function SlabEditor() {
     );
   }
 
-  const baseName = photo.name.replace(/\.[^.]+$/, "") || "slab";
-
   return (
     <div className="flex flex-1 flex-col sm:min-h-0 sm:flex-row">
       <div className="flex flex-1 flex-col items-center gap-2 px-4 pt-4 pb-4 sm:min-w-0 sm:justify-center sm:gap-3.5 sm:p-8">
@@ -607,7 +606,7 @@ export function SlabEditor() {
                 <div className="grid grid-cols-2 gap-2">
                   <ExportActions
                     getBlob={getEditedBlob}
-                    filename={`${baseName}-edited`}
+                    filename={editedName(photo.name)}
                   />
                 </div>
                 <p className="hidden text-center text-xs text-faint sm:block">

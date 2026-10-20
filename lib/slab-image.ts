@@ -58,6 +58,14 @@ export function exportType(sourceType: string) {
   return sourceType === "image/jpeg" ? "image/jpeg" : "image/png";
 }
 
+// "IMG_1234.jpg" saves as "IMG_1234_edited.jpg": the original name, so the
+// file is easy to match with its source, plus "_edited". The extension is
+// added on save from the export's own format.
+export function editedName(originalName: string) {
+  const base = originalName.replace(/\.[^.]+$/, "") || "slab";
+  return `${base}_edited`;
+}
+
 // Re-encoding through a canvas also drops the photo's EXIF metadata,
 // including any GPS location.
 export async function renderEdited(
