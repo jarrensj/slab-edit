@@ -24,7 +24,7 @@ export function creditText() {
 
 // Draws into a width × height area at the context's origin. Sizes are
 // relative to the area, like the watermark, so the on-screen preview and the
-// full-size export look the same. The text stays within the bottom 3.3% of
+// full-size export look the same. The text stays within the bottom 3.9% of
 // the shorter side, below where a corner watermark ends (its padding is 4.2%),
 // so the two never overlap.
 export function drawCredit(
@@ -32,7 +32,7 @@ export function drawCredit(
   width: number,
   height: number,
 ) {
-  const size = Math.max(1, Math.round(Math.min(width, height) * 0.022));
+  const size = Math.max(1, Math.round(Math.min(width, height) * 0.026));
   const text = creditText();
   ctx.save();
   ctx.globalAlpha = 0.9;
