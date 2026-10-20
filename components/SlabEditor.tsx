@@ -18,6 +18,7 @@ import {
 } from "@/components/WatermarkSheet";
 import {
   type Box,
+  defaultBoxes,
   exportType,
   moveBox,
   newBox,
@@ -139,7 +140,7 @@ export function SlabEditor() {
       name: file.name,
       type: file.type,
     });
-    setBoxes([newBox(0)]);
+    setBoxes(defaultBoxes());
   }, []);
 
   useEffect(() => {
@@ -512,8 +513,8 @@ export function SlabEditor() {
           </p>
         ) : (
           <p className="mt-1 text-center text-[13px]/4.5 text-pretty text-faint sm:hidden">
-            Drag the black box over the serial number; drag its corner to
-            resize.
+            Drag the black boxes over the serial number and barcode; drag a
+            corner to resize.
           </p>
         )}
       </div>
@@ -560,8 +561,8 @@ export function SlabEditor() {
                 </div>
               ))}
               <p className="text-[13px]/4.5 text-pretty text-faint">
-                Drag a box over the serial number and pull its corner to
-                resize. Arrow keys nudge; Shift + arrows resize.
+                Drag the boxes over the serial number and barcode, and pull a
+                corner to resize. Arrow keys nudge; Shift + arrows resize.
               </p>
             </section>
 
