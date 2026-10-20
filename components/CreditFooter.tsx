@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef } from "react";
-import { CREDIT_TEXT, creditBandHeight, drawCredit } from "@/lib/credit";
+import { creditBandHeight, creditText, drawCredit } from "@/lib/credit";
 
 // Preview of the credit band under the photo, drawn with the same function as
 // the export. Its aspect ratio comes from the photo's own size, so it's in
@@ -37,7 +37,7 @@ export function CreditFooter({
     <canvas
       ref={canvasRef}
       role="img"
-      aria-label={CREDIT_TEXT}
+      aria-label={creditText()}
       // w-0 + min-w-full: exactly as wide as the photo, without the canvas's
       // default 300px width widening the column for narrow photos.
       className="block w-0 min-w-full rounded-b-lg"
