@@ -21,6 +21,21 @@ export const LAYOUTS: { value: Watermark["layout"]; label: string }[] = [
 
 // Draws the current photo (or a stand-in before one is picked) with the
 // watermark on top, so it can be set up with or without a photo open.
+// A quick shrink when Backspace is pressed on an already empty field, so the
+// key press still gets a visible response.
+function nudgeIfEmpty(e: React.KeyboardEvent<HTMLInputElement>) {
+  if (e.key !== "Backspace" || e.currentTarget.value) return;
+  if (matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+  e.currentTarget.animate(
+    [
+      { transform: "scale(1)" },
+      { transform: "scale(0.95)" },
+      { transform: "scale(1)" },
+    ],
+    { duration: 300, easing: "ease-in-out" },
+  );
+}
+
 function WatermarkPreview({
   photoUrl,
   watermark,
@@ -194,6 +209,7 @@ export function WatermarkSettings({
             type="text"
             value={watermark.text}
             onChange={(e) => update({ text: e.target.value })}
+            onKeyDown={nudgeIfEmpty}
             maxLength={MAX_WATERMARK_TEXT}
             placeholder="Your shop or handle"
             autoComplete="off"
