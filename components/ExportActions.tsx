@@ -38,13 +38,21 @@ function flash(set: (value: boolean) => void) {
   setTimeout(() => set(false), 1800);
 }
 
+type ExportItem = { filename: string; getBlob: () => Promise<Blob> };
+
+// Copy and Download act on the photo on screen. With several photos,
+// "Download all" becomes the main action: the single Download steps back,
+// and phones, short on room in the dock, keep just Copy and Download all.
 export function ExportActions({
   getBlob,
   filename,
+  allItems = [],
 }: {
   getBlob: (type?: string) => Promise<Blob>;
   filename: string;
+  allItems?: ExportItem[];
 }) {
+  const multiple = allItems.length > 1;
   const canCopy = useSyncExternalStore(noSubscription, canCopyImages, () => false);
   const [copying, setCopying] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -89,12 +97,76 @@ export function ExportActions({
         </Button>
       )}
       <Button
-        variant="accent"
+        variant={multiple ? "secondary" : "accent"}
         onClick={onDownload}
         disabled={downloading}
-        className={canCopy ? "" : "col-span-2"}
+        className={multiple ? "max-sm:hidden" : canCopy ? "" : "col-span-2"}
       >
         {downloading ? "Saving…" : downloaded ? "✓ Saved" : "Download"}
+      </Button>
+      {multiple && (
+        <DownloadAllButton
+          items={allItems}
+          className={canCopy ? "sm:col-span-2" : "col-span-2"}
+        />
+      )}
+      {error && (
+        <p
+          role="alert"
+          className="col-span-2 basis-full text-sm text-red-400"
+        >
+          {error}
+        </p>
+      )}
+    </>
+  );
+}
+
+// Saves every photo one after another: each full-size render needs its own
+// canvas, and phones cap how much canvas memory a page can hold at once.
+// TODO: once the share-sheet PR (#15) lands, phones should hand all the files
+// to the share sheet in one go, which on iOS offers "Save N Images".
+function DownloadAllButton({
+  items,
+  className = "",
+}: {
+  items: ExportItem[];
+  className?: string;
+}) {
+  const [progress, setProgress] = useState<number | null>(null);
+  const [done, setDone] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function onDownloadAll() {
+    if (progress !== null) return;
+    setError(null);
+    try {
+      for (const [i, item] of items.entries()) {
+        setProgress(i + 1);
+        const blob = await item.getBlob();
+        saveBlob(blob, `${item.filename}.${EXTENSIONS[blob.type] ?? "png"}`);
+      }
+      flash(setDone);
+    } catch {
+      setError("Couldn't save every photo. Try them one at a time.");
+    } finally {
+      setProgress(null);
+    }
+  }
+
+  return (
+    <>
+      <Button
+        variant="accent"
+        onClick={onDownloadAll}
+        disabled={progress !== null}
+        className={className}
+      >
+        {progress !== null
+          ? `Saving ${progress} of ${items.length}…`
+          : done
+            ? `✓ Saved ${items.length}`
+            : `Download all ${items.length}`}
       </Button>
       {error && (
         <p
