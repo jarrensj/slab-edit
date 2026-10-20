@@ -151,7 +151,7 @@ export function WatermarkSheet({
             value={watermark.text}
             onChange={(e) => update({ text: e.target.value })}
             maxLength={MAX_WATERMARK_TEXT}
-            placeholder="@yourshop"
+            placeholder="placeholder"
             autoComplete="off"
             enterKeyHint="done"
             className="h-11 rounded-lg border border-foreground/20 bg-transparent px-3 text-base outline-sky-500 focus-visible:outline-2"
