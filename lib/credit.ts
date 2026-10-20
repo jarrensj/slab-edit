@@ -1,6 +1,6 @@
-// Every export gets a small "Made with <site>" credit at the bottom center of
-// the photo, where <site> is the host of NEXT_PUBLIC_BASE_URL (e.g.
-// slabedit.com). It's drawn on the photo, so the export keeps its size.
+// Every export gets a small credit at the bottom center of the photo: just the
+// site's domain, the host of NEXT_PUBLIC_BASE_URL (e.g. slabedit.com). It's
+// drawn on the photo, so the export keeps its size.
 // TODO: let people pay to remove the credit. Taking payments will also need
 // Terms of Service and Privacy Policy updates.
 function siteHost() {
@@ -19,7 +19,7 @@ function siteHost() {
 }
 
 export function creditText() {
-  return `Made with ${siteHost()}`;
+  return siteHost();
 }
 
 // Draws into a width × height area at the context's origin. Sizes are

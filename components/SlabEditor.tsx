@@ -369,7 +369,7 @@ export function SlabEditor() {
             </h1>
             <p className="text-[15px]/5.5 text-pretty text-muted">
               Block out the serial numbers on your slabs and add a watermark to
-              your inventory. Nothing is uploaded.
+              your inventory.
             </p>
           </div>
           <div className="flex w-full max-w-155 flex-col items-center gap-7 sm:gap-3.5">
