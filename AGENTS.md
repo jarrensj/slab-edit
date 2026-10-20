@@ -31,8 +31,6 @@ first-class target in the same PR — never a follow-up.
 
 - Check every UI change at phone width (~375px) as well as desktop: no horizontal scroll, and
   nothing hidden behind the browser's toolbars.
-- Touch targets are at least 44×44px. Anything draggable works with touch — put `touch-none` on the
-  drag target so the page doesn't scroll instead.
 - Text inputs are at least 16px, so iOS Safari doesn't zoom in on focus.
 - Prefer `dvh` over `vh`, and respect safe-area insets for anything pinned to a screen edge.
 
