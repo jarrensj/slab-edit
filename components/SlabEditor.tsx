@@ -413,9 +413,10 @@ export function SlabEditor() {
             onLoad={() => setLoadedUrl(photo.url)}
             onError={() => setFailedUrl(photo.url)}
             draggable={false}
-            // On wider screens, the photo fits under the header with room
-            // for the stage's padding and the file name row below it.
-            className="block max-h-[60dvh] max-w-full rounded-lg [-webkit-touch-callout:none] sm:max-h-[calc(100dvh-52px-64px-30px)]"
+            // On wider screens, the photo fits between the header and the
+            // footer with room for the stage's padding and the file name row
+            // below it.
+            className="block max-h-[60dvh] max-w-full rounded-lg [-webkit-touch-callout:none] sm:max-h-[calc(100dvh-52px-36px-64px-30px)]"
           />
           {isLoaded && activeWatermark && (
             <WatermarkLayer watermark={activeWatermark} />

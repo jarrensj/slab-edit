@@ -19,7 +19,8 @@ export const metadata: Metadata = {
 };
 
 // On wider screens the page is a fixed-height app shell: the editor's side
-// panel runs the full height under the header. Phones scroll as usual.
+// panel runs the full height between the header and the footer. Phones scroll
+// as usual.
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
     <html lang="en" className={`${geistSans.variable} ${geistMono.variable}`}>
@@ -37,6 +38,20 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
           </p>
         </header>
         {children}
+        {/* Opens in a new tab, so a photo that's being edited isn't lost. */}
+        <footer className="flex shrink-0 items-center justify-center border-t border-line px-4 pb-[env(safe-area-inset-bottom)] text-xs text-faint sm:h-9 sm:pb-0">
+          <p>
+            Made by{" "}
+            <a
+              href="https://kwaji.com"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex min-h-11 items-center underline underline-offset-2 hover:text-foreground sm:min-h-0"
+            >
+              kwaji
+            </a>
+          </p>
+        </footer>
       </body>
     </html>
   );
