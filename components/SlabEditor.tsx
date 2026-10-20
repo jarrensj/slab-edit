@@ -14,6 +14,8 @@ import {
 
 type Photo = { url: string; name: string; type: string };
 
+type Render = { photo: Photo; boxes: Box[]; type: string; blob: Promise<Blob> };
+
 type DragState = {
   mode: "move" | "resize";
   id: number;
@@ -41,6 +43,7 @@ export function SlabEditor() {
   const stageRef = useRef<HTMLDivElement>(null);
   const imgRef = useRef<HTMLImageElement>(null);
   const dragRef = useRef<DragState | null>(null);
+  const renderRef = useRef<Render[]>([]);
 
   const isLoaded = !!photo && loadedUrl === photo.url;
   const isFailed = !!photo && failedUrl === photo.url;
@@ -129,17 +132,41 @@ export function SlabEditor() {
     };
   }, [ingestImageFile]);
 
-  // Copy asks for PNG; Download takes the photo's own export type.
+  // Renders are cached per (photo, boxes, type). Photo and boxes are replaced,
+  // never mutated, on every change, so Copy/Save always get a render that
+  // matches the screen and never a stale one with a box somewhere else.
   const getEditedBlob = useCallback(
     (type?: string): Promise<Blob> => {
       const img = imgRef.current;
       if (!photo || !img || !img.naturalWidth) {
         return Promise.reject(new Error("Photo isn't loaded yet"));
       }
-      return renderEdited(img, boxes, type ?? exportType(photo.type));
+      const t = type ?? exportType(photo.type);
+      const current = renderRef.current.filter(
+        (r) => r.photo === photo && r.boxes === boxes,
+      );
+      const hit = current.find((r) => r.type === t);
+      if (hit) return hit.blob;
+      const blob = renderEdited(img, boxes, t);
+      renderRef.current = [...current, { photo, boxes, type: t, blob }];
+      blob.catch(() => {
+        renderRef.current = renderRef.current.filter((r) => r.blob !== blob);
+      });
+      return blob;
     },
     [photo, boxes],
   );
+
+  // Render ahead once the boxes settle so Save can hand the share sheet a
+  // finished file: iOS only opens it close to the tap, and encoding a
+  // full-size photo can take longer than that.
+  useEffect(() => {
+    if (!isLoaded) return;
+    const timer = setTimeout(() => {
+      getEditedBlob().catch(() => {});
+    }, 200);
+    return () => clearTimeout(timer);
+  }, [isLoaded, getEditedBlob]);
 
   function onFileChange(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
