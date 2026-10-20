@@ -13,7 +13,7 @@ import {
   renderEdited,
   resizeBox,
 } from "@/lib/slab-image";
-import { hasWatermark, useWatermark } from "@/lib/watermark";
+import { type Watermark, hasWatermark, useWatermark } from "@/lib/watermark";
 
 type Photo = { url: string; name: string; type: string };
 
@@ -29,6 +29,12 @@ type DragState = {
 const KEY_STEP = 0.01;
 const LINK_CLASS =
   "min-h-11 min-w-11 cursor-pointer touch-manipulation px-2 text-sm underline underline-offset-4";
+
+function describeWatermark(watermark: Watermark) {
+  const text = watermark.text.trim();
+  if (watermark.image && text) return `logo + “${text}”`;
+  return watermark.image ? "logo" : `“${text}”`;
+}
 
 const ARROW_KEYS: Record<string, [number, number]> = {
   ArrowLeft: [-1, 0],
@@ -277,7 +283,7 @@ export function SlabEditor() {
           className={`${LINK_CLASS} text-foreground/70`}
         >
           {hasWatermark(watermark)
-            ? `Watermark: “${watermark.text}” · Edit`
+            ? `Watermark: ${describeWatermark(watermark)} · Edit`
             : "+ Add a watermark"}
         </button>
         {fileInput}
@@ -367,9 +373,19 @@ export function SlabEditor() {
                 className="size-5 cursor-pointer accent-foreground"
               />
               Watermark
-              <span className="max-w-36 truncate text-foreground/60">
-                “{watermark.text}”
-              </span>
+              {watermark.image && (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={watermark.image}
+                  alt=""
+                  className="size-5 object-contain"
+                />
+              )}
+              {watermark.text.trim() && (
+                <span className="max-w-36 truncate text-foreground/60">
+                  “{watermark.text.trim()}”
+                </span>
+              )}
             </label>
             <button
               type="button"
