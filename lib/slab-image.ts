@@ -1,4 +1,5 @@
-import { type Watermark, drawWatermark } from "@/lib/watermark";
+import { drawCredit } from "@/lib/credit";
+import { type Watermark, drawWatermark, loadLogo } from "@/lib/watermark";
 
 // A black box as fractions of the photo's width/height, so it is independent
 // of how large the preview renders and maps straight onto the full-size
@@ -59,12 +60,13 @@ export function exportType(sourceType: string) {
 
 // Re-encoding through a canvas also drops the photo's EXIF metadata,
 // including any GPS location.
-export function renderEdited(
+export async function renderEdited(
   img: HTMLImageElement,
   boxes: Box[],
   type: string,
   watermark: Watermark | null = null,
 ): Promise<Blob> {
+  const logo = watermark ? await loadLogo(watermark) : null;
   const scale = Math.min(
     1,
     Math.sqrt(MAX_CANVAS_PIXELS / (img.naturalWidth * img.naturalHeight)),
@@ -75,11 +77,11 @@ export function renderEdited(
   canvas.width = width;
   canvas.height = height;
   const ctx = canvas.getContext("2d");
-  if (!ctx) return Promise.reject(new Error("Couldn't render image"));
+  if (!ctx) throw new Error("Couldn't render image");
 
   ctx.drawImage(img, 0, 0, width, height);
   // Under the boxes, so a box always covers what it hides completely.
-  if (watermark) drawWatermark(ctx, width, height, watermark);
+  if (watermark) drawWatermark(ctx, width, height, watermark, logo);
   ctx.fillStyle = "#000";
   for (const box of boxes) {
     // Round outward so no anti-aliased sliver of the serial survives at the
@@ -90,6 +92,8 @@ export function renderEdited(
     const y1 = Math.ceil((box.y + box.h) * height);
     ctx.fillRect(x0, y0, x1 - x0, y1 - y0);
   }
+  // Over the boxes, so a box can't hide it.
+  drawCredit(ctx, width, height);
 
   return new Promise((resolve, reject) => {
     canvas.toBlob(
