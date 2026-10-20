@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Button } from "@/components/Button";
+import { CreditLayer } from "@/components/CreditLayer";
 import { ExportActions } from "@/components/ExportActions";
 import { WatermarkLayer } from "@/components/WatermarkLayer";
 import { WatermarkSheet } from "@/components/WatermarkSheet";
@@ -358,6 +359,8 @@ export function SlabEditor() {
               </div>
             </div>
           ))}
+        {/* Over the boxes, as in the export, so a box can't hide it. */}
+        {isLoaded && <CreditLayer />}
       </div>
 
       {/* TODO: once HEIC support lands, hide this row while a photo converts,

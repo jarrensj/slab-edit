@@ -1,3 +1,4 @@
+import { drawCredit } from "@/lib/credit";
 import { type Watermark, drawWatermark, loadLogo } from "@/lib/watermark";
 
 // A black box as fractions of the photo's width/height, so it is independent
@@ -91,6 +92,8 @@ export async function renderEdited(
     const y1 = Math.ceil((box.y + box.h) * height);
     ctx.fillRect(x0, y0, x1 - x0, y1 - y0);
   }
+  // Over the boxes, so a box can't hide it.
+  drawCredit(ctx, width, height);
 
   return new Promise((resolve, reject) => {
     canvas.toBlob(
