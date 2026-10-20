@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Button } from "@/components/Button";
-import { CreditFooter } from "@/components/CreditFooter";
+import { CreditLayer } from "@/components/CreditLayer";
 import { ExportActions } from "@/components/ExportActions";
 import { WatermarkLayer } from "@/components/WatermarkLayer";
 import { WatermarkSheet } from "@/components/WatermarkSheet";
@@ -17,8 +17,6 @@ import {
 import { type Watermark, hasWatermark, useWatermark } from "@/lib/watermark";
 
 type Photo = { url: string; name: string; type: string };
-
-type Size = { width: number; height: number };
 
 type DragState = {
   mode: "move" | "resize";
@@ -50,7 +48,6 @@ export function SlabEditor() {
   const [photo, setPhoto] = useState<Photo | null>(null);
   const [loadedUrl, setLoadedUrl] = useState<string | null>(null);
   const [failedUrl, setFailedUrl] = useState<string | null>(null);
-  const [photoSize, setPhotoSize] = useState<Size | null>(null);
   const [boxes, setBoxes] = useState<Box[]>([]);
   const [isDragging, setIsDragging] = useState(false);
   const [watermarkOn, setWatermarkOn] = useState(true);
@@ -300,83 +297,70 @@ export function SlabEditor() {
 
   return (
     <div className="flex w-full flex-col items-center gap-4">
-      {/* The photo, with the credit band every export gets under it. */}
-      <div className="flex flex-col">
-        <div
-          ref={stageRef}
-          className={`relative select-none ${
-            isDragging ? "ring-2 ring-foreground" : ""
-          }`}
-        >
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            ref={imgRef}
-            src={photo.url}
-            alt="Slab photo"
-            onLoad={(e) => {
-              setPhotoSize({
-                width: e.currentTarget.naturalWidth,
-                height: e.currentTarget.naturalHeight,
-              });
-              setLoadedUrl(photo.url);
-            }}
-            onError={() => setFailedUrl(photo.url)}
-            draggable={false}
-            className="block max-h-[60dvh] max-w-full rounded-t-lg [-webkit-touch-callout:none]"
-          />
-          {isLoaded && activeWatermark && (
-            <WatermarkLayer watermark={activeWatermark} />
-          )}
-          {isLoaded &&
-            boxes.map((box) => (
-              <div
-                key={box.id}
-                tabIndex={0}
-                role="group"
-                aria-label="Black box. Drag or use the arrow keys to move it, Shift+arrow keys to resize it, Delete to remove it."
-                onPointerDown={(e) => startDrag(e, box, "move")}
-                onPointerMove={onPointerMove}
-                onPointerUp={endDrag}
-                onPointerCancel={endDrag}
-                onKeyDown={(e) => onBoxKeyDown(e, box)}
-                className="absolute cursor-move touch-none bg-black ring-1 ring-white/70 outline-offset-2 outline-sky-500 focus-visible:outline-2"
-                style={{
-                  left: `${box.x * 100}%`,
-                  top: `${box.y * 100}%`,
-                  width: `${box.w * 100}%`,
-                  height: `${box.h * 100}%`,
-                }}
-              >
-                {/* Both corner controls have a 44px hit area for thumbs, set
-                    mostly outside the box so grabbing near a corner still
-                    moves the box. The visible dot sits on the corner itself. */}
-                <button
-                  type="button"
-                  onClick={() => removeBox(box.id)}
-                  onPointerDown={(e) => e.stopPropagation()}
-                  aria-label="Remove box"
-                  className="absolute -right-8 -top-8 size-11 cursor-pointer touch-manipulation"
-                >
-                  <span className="absolute left-0 top-5 flex size-6 items-center justify-center rounded-full bg-white text-sm leading-none text-zinc-900 shadow ring-1 ring-zinc-300">
-                    ×
-                  </span>
-                </button>
-                <div
-                  role="presentation"
-                  onPointerDown={(e) => startDrag(e, box, "resize")}
-                  className="absolute -bottom-8 -right-8 size-11 cursor-nwse-resize touch-none"
-                >
-                  <span className="absolute left-1.25 top-1.25 size-3.5 rounded-sm border border-zinc-900 bg-white" />
-                </div>
-              </div>
-            ))}
-        </div>
-        {isLoaded && photoSize && (
-          <CreditFooter
-            photoWidth={photoSize.width}
-            photoHeight={photoSize.height}
-          />
+      <div
+        ref={stageRef}
+        className={`relative select-none ${
+          isDragging ? "ring-2 ring-foreground" : ""
+        }`}
+      >
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          ref={imgRef}
+          src={photo.url}
+          alt="Slab photo"
+          onLoad={() => setLoadedUrl(photo.url)}
+          onError={() => setFailedUrl(photo.url)}
+          draggable={false}
+          className="block max-h-[60dvh] max-w-full rounded-lg [-webkit-touch-callout:none]"
+        />
+        {isLoaded && activeWatermark && (
+          <WatermarkLayer watermark={activeWatermark} />
         )}
+        {isLoaded &&
+          boxes.map((box) => (
+            <div
+              key={box.id}
+              tabIndex={0}
+              role="group"
+              aria-label="Black box. Drag or use the arrow keys to move it, Shift+arrow keys to resize it, Delete to remove it."
+              onPointerDown={(e) => startDrag(e, box, "move")}
+              onPointerMove={onPointerMove}
+              onPointerUp={endDrag}
+              onPointerCancel={endDrag}
+              onKeyDown={(e) => onBoxKeyDown(e, box)}
+              className="absolute cursor-move touch-none bg-black ring-1 ring-white/70 outline-offset-2 outline-sky-500 focus-visible:outline-2"
+              style={{
+                left: `${box.x * 100}%`,
+                top: `${box.y * 100}%`,
+                width: `${box.w * 100}%`,
+                height: `${box.h * 100}%`,
+              }}
+            >
+              {/* Both corner controls have a 44px hit area for thumbs, set
+                  mostly outside the box so grabbing near a corner still
+                  moves the box. The visible dot sits on the corner itself. */}
+              <button
+                type="button"
+                onClick={() => removeBox(box.id)}
+                onPointerDown={(e) => e.stopPropagation()}
+                aria-label="Remove box"
+                className="absolute -right-8 -top-8 size-11 cursor-pointer touch-manipulation"
+              >
+                <span className="absolute left-0 top-5 flex size-6 items-center justify-center rounded-full bg-white text-sm leading-none text-zinc-900 shadow ring-1 ring-zinc-300">
+                  ×
+                </span>
+              </button>
+              <div
+                role="presentation"
+                onPointerDown={(e) => startDrag(e, box, "resize")}
+                className="absolute -bottom-8 -right-8 size-11 cursor-nwse-resize touch-none"
+              >
+                <span className="absolute left-1.25 top-1.25 size-3.5 rounded-sm border border-zinc-900 bg-white" />
+              </div>
+            </div>
+          ))}
+        {/* Over the boxes, as in the export, so a box can't hide it. */}
+        {isLoaded && <CreditLayer />}
       </div>
 
       {/* TODO: once HEIC support lands, hide this row while a photo converts,

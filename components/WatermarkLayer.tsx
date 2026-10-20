@@ -42,7 +42,7 @@ export function WatermarkLayer({ watermark }: { watermark: Watermark }) {
     <canvas
       ref={canvasRef}
       aria-hidden
-      className="pointer-events-none absolute inset-0 size-full rounded-t-lg"
+      className="pointer-events-none absolute inset-0 size-full rounded-lg"
     />
   );
 }

@@ -1,18 +1,11 @@
 "use client";
 
 import { useEffect, useRef } from "react";
-import { creditBandHeight, creditText, drawCredit } from "@/lib/credit";
+import { creditText, drawCredit } from "@/lib/credit";
 
-// Preview of the credit band under the photo, drawn with the same function as
-// the export. Its aspect ratio comes from the photo's own size, so it's in
-// the same proportion to the photo as in the saved file.
-export function CreditFooter({
-  photoWidth,
-  photoHeight,
-}: {
-  photoWidth: number;
-  photoHeight: number;
-}) {
+// Live preview of the "Made with …" credit over the photo, drawn with the same
+// function as the export so what's on screen is what gets saved.
+export function CreditLayer() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
   useEffect(() => {
@@ -26,7 +19,7 @@ export function CreditFooter({
       const height = Math.round(canvas!.clientHeight * dpr);
       canvas!.width = width;
       canvas!.height = height;
-      drawCredit(ctx, 0, width, height);
+      drawCredit(ctx, width, height);
     }
     const observer = new ResizeObserver(draw);
     observer.observe(canvas);
@@ -38,12 +31,7 @@ export function CreditFooter({
       ref={canvasRef}
       role="img"
       aria-label={creditText()}
-      // w-0 + min-w-full: exactly as wide as the photo, without the canvas's
-      // default 300px width widening the column for narrow photos.
-      className="block w-0 min-w-full rounded-b-lg"
-      style={{
-        aspectRatio: `${photoWidth} / ${creditBandHeight(photoWidth, photoHeight)}`,
-      }}
+      className="pointer-events-none absolute inset-0 size-full rounded-lg"
     />
   );
 }
