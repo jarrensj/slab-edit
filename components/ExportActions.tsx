@@ -89,7 +89,7 @@ export function ExportActions({
         </Button>
       )}
       <Button
-        variant="primary"
+        variant="accent"
         onClick={onDownload}
         disabled={downloading}
         className={canCopy ? "" : "col-span-2"}
@@ -99,7 +99,7 @@ export function ExportActions({
       {error && (
         <p
           role="alert"
-          className="col-span-2 basis-full text-sm text-red-600 dark:text-red-400"
+          className="col-span-2 basis-full text-sm text-red-400"
         >
           {error}
         </p>
