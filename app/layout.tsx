@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 
@@ -16,6 +16,16 @@ export const metadata: Metadata = {
   title: "slab edit",
   description:
     "Block out the serial numbers on your slabs and/or apply a watermark to your inventory before you share.",
+  // Name and full-screen launch when added to an iPhone's home screen.
+  appleWebApp: { capable: true, title: "slab edit" },
+};
+
+// Matches the browser's toolbar to the page background in light and dark mode.
+export const viewport: Viewport = {
+  themeColor: [
+    { media: "(prefers-color-scheme: light)", color: "#ffffff" },
+    { media: "(prefers-color-scheme: dark)", color: "#0a0a0a" },
+  ],
 };
 
 // On wider screens the page is a fixed-height app shell: the editor's side
