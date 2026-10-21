@@ -3,6 +3,8 @@
 import {
   useCallback,
   useEffect,
+  useEffectEvent,
+  useReducer,
   useRef,
   useState,
   useSyncExternalStore,
@@ -16,8 +18,10 @@ import {
   WatermarkSettings,
   WatermarkSheet,
 } from "@/components/WatermarkSheet";
+import { NO_HISTORY, boxHistoryReducer } from "@/lib/box-history";
 import {
   type Box,
+  defaultBoxes,
   exportType,
   moveBox,
   newBox,
@@ -34,10 +38,26 @@ type DragState = {
   startX: number;
   startY: number;
   start: Box;
+  // All the boxes as they were, for undoing the whole drag in one step.
+  before: Box[];
 };
 
 // Arrow keys nudge a box by 1% of the photo; with Shift they resize it.
 const KEY_STEP = 0.01;
+// Nudges to the same box this close together undo as one step.
+const NUDGE_RUN_MS = 1000;
+
+// Where ⌘Z belongs to the browser's own text undo.
+function isTextEntry(target: EventTarget | null) {
+  if (target instanceof HTMLTextAreaElement) return true;
+  if (target instanceof HTMLElement && target.isContentEditable) return true;
+  return (
+    target instanceof HTMLInputElement &&
+    !["checkbox", "radio", "range", "button", "file", "color"].includes(
+      target.type,
+    )
+  );
+}
 // Buttons that read as text. The pseudo-element pads the tap target out to
 // about 44px without taking up any room.
 const TEXT_BUTTON_CLASS =
@@ -111,7 +131,12 @@ export function SlabEditor() {
   const [photo, setPhoto] = useState<Photo | null>(null);
   const [loadedUrl, setLoadedUrl] = useState<string | null>(null);
   const [failedUrl, setFailedUrl] = useState<string | null>(null);
-  const [boxes, setBoxes] = useState<Box[]>([]);
+  // TODO: once several photos can be open at once (#21), keep a history per
+  // photo, so ⌘Z never reaches back into a different photo.
+  const [boxHistory, dispatchBoxes] = useReducer(
+    boxHistoryReducer,
+    NO_HISTORY,
+  );
   const [isDragging, setIsDragging] = useState(false);
   const [watermarkOn, setWatermarkOn] = useState(true);
   const [watermarkSheetOpen, setWatermarkSheetOpen] = useState(false);
@@ -121,6 +146,12 @@ export function SlabEditor() {
   const stageRef = useRef<HTMLDivElement>(null);
   const imgRef = useRef<HTMLImageElement>(null);
   const dragRef = useRef<DragState | null>(null);
+  const nudgeRef = useRef<{ id: number; at: number; result: Box[] } | null>(
+    null,
+  );
+
+  const boxes = boxHistory.present;
+  const canUndo = boxHistory.past.length > 0;
 
   const isLoaded = !!photo && loadedUrl === photo.url;
   const isFailed = !!photo && failedUrl === photo.url;
@@ -139,7 +170,7 @@ export function SlabEditor() {
       name: file.name,
       type: file.type,
     });
-    setBoxes([newBox(0)]);
+    dispatchBoxes({ type: "reset", boxes: defaultBoxes() });
   }, []);
 
   useEffect(() => {
@@ -242,16 +273,41 @@ export function SlabEditor() {
   }
 
   function addBox() {
-    setBoxes((prev) => [...prev, newBox(prev.length)]);
+    dispatchBoxes({ type: "change", boxes: [...boxes, newBox(boxes.length)] });
   }
 
   function removeBox(id: number) {
-    setBoxes((prev) => prev.filter((b) => b.id !== id));
+    dispatchBoxes({ type: "change", boxes: boxes.filter((b) => b.id !== id) });
   }
 
-  function replaceBox(next: Box) {
-    setBoxes((prev) => prev.map((b) => (b.id === next.id ? next : b)));
+  function withBox(next: Box) {
+    return boxes.map((b) => (b.id === next.id ? next : b));
   }
+
+  function undo() {
+    dispatchBoxes({ type: "undo" });
+  }
+
+  // ⌘Z / Ctrl+Z undoes box changes; ⇧⌘Z, Ctrl+Shift+Z or Ctrl+Y redoes.
+  // Text fields and the watermark dialog keep their own undo.
+  const onUndoKey = useEffectEvent((e: KeyboardEvent) => {
+    if (!photo || !(e.metaKey || e.ctrlKey) || e.altKey) return;
+    const target = e.target as HTMLElement | null;
+    if (isTextEntry(target) || target?.closest?.("dialog")) return;
+    const key = e.key.toLowerCase();
+    const redo =
+      (key === "z" && e.shiftKey) || (key === "y" && e.ctrlKey && !e.metaKey);
+    if (key !== "z" && !redo) return;
+    e.preventDefault();
+    if (dragRef.current) return;
+    dispatchBoxes({ type: redo ? "redo" : "undo" });
+  });
+
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => onUndoKey(e);
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, []);
 
   function editWatermark() {
     setWatermarkSheetOpen(true);
@@ -275,7 +331,14 @@ export function SlabEditor() {
     e.stopPropagation();
     e.currentTarget.setPointerCapture(e.pointerId);
     const { fx, fy } = pointerFractions(e);
-    dragRef.current = { mode, id: box.id, startX: fx, startY: fy, start: box };
+    dragRef.current = {
+      mode,
+      id: box.id,
+      startX: fx,
+      startY: fy,
+      start: box,
+      before: boxes,
+    };
   }
 
   // Attached to the box only: events from its captured resize handle bubble
@@ -286,15 +349,20 @@ export function SlabEditor() {
     const { fx, fy } = pointerFractions(e);
     const dx = fx - drag.startX;
     const dy = fy - drag.startY;
-    replaceBox(
-      drag.mode === "move"
-        ? moveBox(drag.start, dx, dy)
-        : resizeBox(drag.start, dx, dy),
-    );
+    dispatchBoxes({
+      type: "preview",
+      boxes: withBox(
+        drag.mode === "move"
+          ? moveBox(drag.start, dx, dy)
+          : resizeBox(drag.start, dx, dy),
+      ),
+    });
   }
 
   function endDrag() {
+    const drag = dragRef.current;
     dragRef.current = null;
+    if (drag) dispatchBoxes({ type: "settle", before: drag.before });
   }
 
   function onBoxKeyDown(e: React.KeyboardEvent, box: Box) {
@@ -307,7 +375,19 @@ export function SlabEditor() {
     if (!arrow) return;
     e.preventDefault();
     const [dx, dy] = [arrow[0] * KEY_STEP, arrow[1] * KEY_STEP];
-    replaceBox(e.shiftKey ? resizeBox(box, dx, dy) : moveBox(box, dx, dy));
+    const next = withBox(
+      e.shiftKey ? resizeBox(box, dx, dy) : moveBox(box, dx, dy),
+    );
+    // A run of nudges to one box is one undo step, as long as nothing else
+    // (an undo, a drag) changed the boxes in between.
+    const now = e.timeStamp;
+    const last = nudgeRef.current;
+    const continuing =
+      last?.id === box.id &&
+      last.result === boxes &&
+      now - last.at < NUDGE_RUN_MS;
+    nudgeRef.current = { id: box.id, at: now, result: next };
+    dispatchBoxes({ type: continuing ? "preview" : "change", boxes: next });
   }
 
   const fileInput = (
@@ -339,7 +419,7 @@ export function SlabEditor() {
             </h1>
             <p className="text-[15px]/5.5 text-pretty text-muted">
               Block out the serial numbers on your slabs and add a watermark to
-              your inventory. Nothing is uploaded.
+              your inventory.
             </p>
           </div>
           <div className="flex w-full max-w-155 flex-col items-center gap-7 sm:gap-3.5">
@@ -513,8 +593,8 @@ export function SlabEditor() {
           </p>
         ) : (
           <p className="mt-1 text-center text-[13px]/4.5 text-pretty text-faint sm:hidden">
-            Drag the black box over the serial number; drag its corner to
-            resize.
+            Drag the black boxes over the serial number and barcode; drag a
+            corner to resize.
           </p>
         )}
       </div>
@@ -534,9 +614,19 @@ export function SlabEditor() {
             <section className="hidden flex-col gap-3 border-b border-line px-5 pt-5 pb-4.5 sm:flex">
               <div className="flex items-center justify-between">
                 <h2 className="section-label">Boxes</h2>
-                <Button size="sm" onClick={addBox} disabled={!isLoaded}>
-                  + Add box
-                </Button>
+                <div className="flex gap-2">
+                  <Button
+                    size="sm"
+                    onClick={undo}
+                    disabled={!canUndo}
+                    title="Undo (⌘Z / Ctrl+Z)"
+                  >
+                    Undo
+                  </Button>
+                  <Button size="sm" onClick={addBox} disabled={!isLoaded}>
+                    + Add box
+                  </Button>
+                </div>
               </div>
               {boxes.map((box, i) => (
                 <div
@@ -561,8 +651,8 @@ export function SlabEditor() {
                 </div>
               ))}
               <p className="text-[13px]/4.5 text-pretty text-faint">
-                Drag a box over the serial number and pull its corner to
-                resize. Arrow keys nudge; Shift + arrows resize.
+                Drag the boxes over the serial number and barcode, and pull a
+                corner to resize. Arrow keys nudge; Shift + arrows resize.
               </p>
             </section>
 
@@ -595,13 +685,15 @@ export function SlabEditor() {
               )}
             </section>
 
-            <Button
-              onClick={addBox}
-              disabled={!isLoaded}
-              className="w-full sm:hidden"
-            >
-              + Add box
-            </Button>
+            {/* Phones have no ⌘Z, so they get the button. */}
+            <div className="grid grid-cols-2 gap-2 sm:hidden">
+              <Button onClick={undo} disabled={!canUndo}>
+                Undo
+              </Button>
+              <Button onClick={addBox} disabled={!isLoaded}>
+                + Add box
+              </Button>
+            </div>
 
             {isLoaded && (
               <div className="flex flex-col gap-2.5 sm:mt-auto sm:p-5">

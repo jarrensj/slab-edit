@@ -35,6 +35,20 @@ export function newBox(index: number): Box {
   };
 }
 
+// New photos start with two boxes across the label: one for the serial
+// number and one for the barcode, which scans back to the same number.
+// They sit side by side rather than stacked, so on a small photo one box's
+// corner controls don't land on the other's.
+export function defaultBoxes(): Box[] {
+  const w = 0.36;
+  const h = 0.08;
+  const y = 0.1;
+  return [
+    { id: nextBoxId++, x: 0.1, y, w, h },
+    { id: nextBoxId++, x: 0.54, y, w, h },
+  ];
+}
+
 export function moveBox(box: Box, dx: number, dy: number): Box {
   return {
     ...box,
