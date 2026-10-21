@@ -405,6 +405,7 @@ export function SlabEditor() {
       open={watermarkSheetOpen}
       onClose={() => setWatermarkSheetOpen(false)}
       photoUrl={isLoaded ? photo.url : null}
+      asDrawer={isWide}
     />
   );
 
