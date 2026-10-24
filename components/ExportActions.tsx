@@ -40,6 +40,21 @@ function prefersShareSheet() {
   );
 }
 
+// False when the browser won't open the sheet: the tap that asked for it no
+// longer counts, or it won't take these files. Closing the sheet without
+// picking anything (AbortError) counts as done.
+async function openShareSheet(files: File[]) {
+  try {
+    await navigator.share({ files });
+    return true;
+  } catch (err) {
+    if (!(err instanceof DOMException)) throw err;
+    if (err.name === "NotAllowedError") return false;
+    if (err.name !== "AbortError") throw err;
+    return true;
+  }
+}
+
 // Image clipboard writes need ClipboardItem and a secure context (not a
 // plain-http LAN address); without them there's no Copy button at all.
 function canCopyImages() {
@@ -106,16 +121,8 @@ export function ExportActions({
       const name = `${filename}.${EXTENSIONS[blob.type] ?? "png"}`;
       const file = new File([blob], name, { type: blob.type });
       if (shareSheet && navigator.canShare?.({ files: [file] })) {
-        try {
-          await navigator.share({ files: [file] });
-        } catch (err) {
-          if (!(err instanceof DOMException)) throw err;
-          // AbortError: the sheet was closed without picking anything.
-          if (err.name === "NotAllowedError") {
-            setError("The photo is ready now. Tap again to share it.");
-          } else if (err.name !== "AbortError") {
-            throw err;
-          }
+        if (!(await openShareSheet([file]))) {
+          setError("The photo is ready now. Tap again to share it.");
         }
         return;
       }
@@ -152,6 +159,7 @@ export function ExportActions({
       {multiple && (
         <DownloadAllButton
           items={allItems}
+          shareSheet={shareSheet}
           className={canCopy ? "sm:col-span-2" : "col-span-2"}
         />
       )}
@@ -185,38 +193,73 @@ function uniqueName(name: string, taken: Set<string>) {
 }
 
 // Renders the photos one after another (each full-size render needs its own
-// canvas, and phones cap how much canvas memory a page can hold at once) and
-// saves them as one .zip. Separate files don't work: a page gets one download
-// per click, and Chrome holds back the rest behind a "Download multiple
-// files" prompt that's easy to miss.
-// TODO: on phones, hand all the files to the share sheet in one go instead
-// of a zip, as Save / Share does for one photo; iOS then offers "Save N
-// Images".
+// canvas, and phones cap how much canvas memory a page can hold at once).
+// Phones then hand them all to the share sheet, where iOS offers "Save N
+// Images"; elsewhere they're saved as one .zip. Separate downloads don't work:
+// a page gets one download per click, and Chrome holds back the rest behind a
+// "Download multiple files" prompt that's easy to miss.
 function DownloadAllButton({
   items,
+  shareSheet,
   className = "",
 }: {
   items: ExportItem[];
+  shareSheet: boolean;
   className?: string;
 }) {
   const [progress, setProgress] = useState<number | null>(null);
   const [done, setDone] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Files rendered for the share sheet after the tap that asked for them
+  // stopped counting, waiting for the next tap. They're only good for the
+  // items they came from: a new photo, a box change, or a watermark change
+  // drops them.
+  const [prepared, setPrepared] = useState<{
+    items: ExportItem[];
+    files: File[];
+  } | null>(null);
+  const ready = prepared?.items === items ? prepared.files : null;
+
+  async function renderAll() {
+    const files: File[] = [];
+    const taken = new Set<string>();
+    for (const [i, item] of items.entries()) {
+      setProgress(i + 1);
+      const blob = await item.getBlob();
+      const name = `${item.filename}.${EXTENSIONS[blob.type] ?? "png"}`;
+      files.push(new File([blob], uniqueName(name, taken), { type: blob.type }));
+    }
+    setProgress(null);
+    return files;
+  }
+
+  async function saveZip(files: File[]) {
+    saveBlob(await downloadZip(files).blob(), ZIP_NAME);
+    flash(setDone);
+  }
 
   async function onDownloadAll() {
     if (progress !== null) return;
     setError(null);
     try {
-      const files = [];
-      const taken = new Set<string>();
-      for (const [i, item] of items.entries()) {
-        setProgress(i + 1);
-        const blob = await item.getBlob();
-        const name = `${item.filename}.${EXTENSIONS[blob.type] ?? "png"}`;
-        files.push({ name: uniqueName(name, taken), input: blob });
+      if (ready) {
+        setPrepared(null);
+        // Straight from this tap, so the sheet can open. If the browser still
+        // refuses, it won't take this many files, so they go in the zip.
+        if (!(await openShareSheet(ready))) await saveZip(ready);
+        return;
       }
-      saveBlob(await downloadZip(files).blob(), ZIP_NAME);
-      flash(setDone);
+      const files = await renderAll();
+      if (shareSheet && navigator.canShare?.({ files })) {
+        // iOS only opens the sheet close to the tap, and rendering every
+        // photo usually takes longer; then the next tap opens it.
+        const tapCounts = navigator.userActivation?.isActive !== false;
+        if (!tapCounts || !(await openShareSheet(files))) {
+          setPrepared({ items, files });
+        }
+        return;
+      }
+      await saveZip(files);
     } catch {
       setError("Couldn't save every photo. Try them one at a time.");
     } finally {
@@ -233,10 +276,12 @@ function DownloadAllButton({
         className={className}
       >
         {progress !== null
-          ? `Saving ${progress} of ${items.length}…`
-          : done
-            ? `✓ Saved ${items.length}`
-            : `Download all ${items.length}`}
+          ? `${shareSheet ? "Preparing" : "Saving"} ${progress} of ${items.length}…`
+          : ready
+            ? `Tap to save ${items.length}`
+            : done
+              ? `✓ Saved ${items.length}`
+              : `${shareSheet ? "Save" : "Download"} all ${items.length}`}
       </Button>
       {error && (
         <p
