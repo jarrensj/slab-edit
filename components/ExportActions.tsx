@@ -1,5 +1,6 @@
 "use client";
 
+import { downloadZip } from "client-zip";
 import { useState, useSyncExternalStore } from "react";
 import { Button } from "@/components/Button";
 
@@ -122,10 +123,31 @@ export function ExportActions({
   );
 }
 
-// Saves every photo one after another: each full-size render needs its own
-// canvas, and phones cap how much canvas memory a page can hold at once.
+const ZIP_NAME = "slabs-edited.zip";
+
+// Photos pasted from the clipboard are all called image.png, so a repeated
+// name gets a number, as the browser does for its own downloads. Desktop file
+// systems ignore case, so this does too.
+function uniqueName(name: string, taken: Set<string>) {
+  const dot = name.lastIndexOf(".");
+  const stem = dot > 0 ? name.slice(0, dot) : name;
+  const ext = dot > 0 ? name.slice(dot) : "";
+  let candidate = name;
+  for (let n = 2; taken.has(candidate.toLowerCase()); n++) {
+    candidate = `${stem}-${n}${ext}`;
+  }
+  taken.add(candidate.toLowerCase());
+  return candidate;
+}
+
+// Renders the photos one after another (each full-size render needs its own
+// canvas, and phones cap how much canvas memory a page can hold at once) and
+// saves them as one .zip. Separate files don't work: a page gets one download
+// per click, and Chrome holds back the rest behind a "Download multiple
+// files" prompt that's easy to miss.
 // TODO: once the share-sheet PR (#15) lands, phones should hand all the files
-// to the share sheet in one go, which on iOS offers "Save N Images".
+// to the share sheet in one go instead of a zip; iOS then offers "Save N
+// Images".
 function DownloadAllButton({
   items,
   className = "",
@@ -141,11 +163,15 @@ function DownloadAllButton({
     if (progress !== null) return;
     setError(null);
     try {
+      const files = [];
+      const taken = new Set<string>();
       for (const [i, item] of items.entries()) {
         setProgress(i + 1);
         const blob = await item.getBlob();
-        saveBlob(blob, `${item.filename}.${EXTENSIONS[blob.type] ?? "png"}`);
+        const name = `${item.filename}.${EXTENSIONS[blob.type] ?? "png"}`;
+        files.push({ name: uniqueName(name, taken), input: blob });
       }
+      saveBlob(await downloadZip(files).blob(), ZIP_NAME);
       flash(setDone);
     } catch {
       setError("Couldn't save every photo. Try them one at a time.");

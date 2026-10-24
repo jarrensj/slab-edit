@@ -859,6 +859,7 @@ export function SlabEditor() {
                   Saves as{" "}
                   {exportType(photo.type) === "image/jpeg" ? "JPG" : "PNG"} at
                   the original size.
+                  {multiple && " Download all puts them in one .zip."}
                 </p>
               </div>
             )}
