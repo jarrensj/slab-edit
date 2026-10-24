@@ -21,6 +21,21 @@ export const LAYOUTS: { value: Watermark["layout"]; label: string }[] = [
 
 // Draws the current photo (or a stand-in before one is picked) with the
 // watermark on top, so it can be set up with or without a photo open.
+// A quick shrink when Backspace is pressed on an already empty field, so the
+// key press still gets a visible response.
+function nudgeIfEmpty(e: React.KeyboardEvent<HTMLInputElement>) {
+  if (e.key !== "Backspace" || e.currentTarget.value) return;
+  if (matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+  e.currentTarget.animate(
+    [
+      { transform: "scale(1)" },
+      { transform: "scale(0.95)" },
+      { transform: "scale(1)" },
+    ],
+    { duration: 300, easing: "ease-in-out" },
+  );
+}
+
 function WatermarkPreview({
   photoUrl,
   watermark,
@@ -194,6 +209,7 @@ export function WatermarkSettings({
             type="text"
             value={watermark.text}
             onChange={(e) => update({ text: e.target.value })}
+            onKeyDown={nudgeIfEmpty}
             maxLength={MAX_WATERMARK_TEXT}
             placeholder="Your shop or handle"
             autoComplete="off"
@@ -305,16 +321,19 @@ export function WatermarkSettings({
   );
 }
 
-// The settings as a bottom sheet on phones, or a centered dialog on larger
-// screens when there's no side panel to put them in.
+// The settings as a bottom sheet on phones, or, on wider screens when there's
+// no side panel to put them in, a drawer that slides in where the panel would
+// be and lays them out the same way.
 export function WatermarkSheet({
   open,
   onClose,
   photoUrl,
+  asDrawer = false,
 }: {
   open: boolean;
   onClose: () => void;
   photoUrl: string | null;
+  asDrawer?: boolean;
 }) {
   const dialogRef = useRef<HTMLDialogElement>(null);
 
@@ -334,15 +353,25 @@ export function WatermarkSheet({
         if (e.target === e.currentTarget) onClose();
       }}
       aria-labelledby="watermark-title"
-      className="mx-0 mt-auto mb-0 max-h-[90dvh] w-full max-w-none overflow-y-auto rounded-t-2xl border-t border-white/10 bg-panel p-0 text-foreground backdrop:bg-black/60 sm:m-auto sm:max-w-md sm:rounded-2xl sm:border sm:border-line"
+      className={`sheet bg-panel p-0 text-foreground backdrop:bg-black/60 ${
+        asDrawer
+          ? "m-0 ml-auto h-dvh max-h-none w-84 max-w-none border-l border-line"
+          : "mx-0 mt-auto mb-0 max-h-[90dvh] w-full max-w-none overflow-y-auto rounded-t-2xl border-t border-white/10"
+      }`}
     >
-      <div className="flex flex-col gap-4 px-5 pt-2 pb-[max(1.5rem,env(safe-area-inset-bottom))] sm:pt-5">
-        <div
-          aria-hidden
-          className="mx-auto mb-1 h-1 w-9 rounded-full bg-line-strong sm:hidden"
-        />
-        <WatermarkSettings photoUrl={photoUrl} onDone={onClose} />
-      </div>
+      {asDrawer ? (
+        <div className="flex h-full flex-col">
+          <WatermarkSettings inPanel photoUrl={photoUrl} onDone={onClose} />
+        </div>
+      ) : (
+        <div className="flex flex-col gap-4 px-5 pt-2 pb-[max(1.5rem,env(safe-area-inset-bottom))]">
+          <div
+            aria-hidden
+            className="mx-auto mb-1 h-1 w-9 rounded-full bg-line-strong"
+          />
+          <WatermarkSettings photoUrl={photoUrl} onDone={onClose} />
+        </div>
+      )}
     </dialog>
   );
 }
