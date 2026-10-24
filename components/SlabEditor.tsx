@@ -4,6 +4,7 @@ import {
   useCallback,
   useEffect,
   useEffectEvent,
+  useMemo,
   useRef,
   useState,
   useSyncExternalStore,
@@ -525,6 +526,27 @@ export function SlabEditor() {
     />
   );
 
+  // Every photo with its own boxes, rendered only when "Download all" asks.
+  // The same list until a photo, its boxes, or the watermark change, so files
+  // it prepared for the share sheet are known to still match.
+  // TODO: once HEIC support (#8) lands, photos in a batch that were never
+  // opened haven't been converted yet; convert them here (and for their
+  // thumbnails) so Chrome can render them.
+  const exportItems = useMemo(
+    () =>
+      photos.map((p) => ({
+        filename: `${baseNameOf(p.name)}-edited`,
+        getBlob: async () =>
+          renderEdited(
+            await loadImage(p.url),
+            p.history.present,
+            exportType(p.type),
+            activeWatermark,
+          ),
+      })),
+    [photos, activeWatermark],
+  );
+
   if (!photo) {
     return (
       <div className="flex flex-1 flex-col sm:overflow-y-auto">
@@ -592,20 +614,6 @@ export function SlabEditor() {
   }
 
   const index = photos.indexOf(photo);
-  // Every photo with its own boxes, rendered only when "Download all" asks.
-  // TODO: once HEIC support (#8) lands, photos in a batch that were never
-  // opened haven't been converted yet; convert them here (and for their
-  // thumbnails) so Chrome can render them.
-  const exportItems = photos.map((p) => ({
-    filename: `${baseNameOf(p.name)}-edited`,
-    getBlob: async () =>
-      renderEdited(
-        await loadImage(p.url),
-        p.history.present,
-        exportType(p.type),
-        activeWatermark,
-      ),
-  }));
 
   return (
     <div className="flex flex-1 flex-col sm:min-h-0 sm:flex-row">
@@ -892,7 +900,13 @@ export function SlabEditor() {
                   Saves as{" "}
                   {exportType(photo.type) === "image/jpeg" ? "JPG" : "PNG"} at
                   the original size.
-                  {multiple && " Download all puts them in one .zip."}
+                  {/* Touch screens get the share sheet instead. */}
+                  {multiple && (
+                    <span className="pointer-coarse:hidden">
+                      {" "}
+                      Download all puts them in one .zip.
+                    </span>
+                  )}
                 </p>
               </div>
             )}
