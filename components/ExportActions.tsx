@@ -1,5 +1,6 @@
 "use client";
 
+import { downloadZip } from "client-zip";
 import { useState, useSyncExternalStore } from "react";
 import { Button } from "@/components/Button";
 
@@ -53,18 +54,26 @@ function flash(set: (value: boolean) => void) {
   setTimeout(() => set(false), 1800);
 }
 
+type ExportItem = { filename: string; getBlob: () => Promise<Blob> };
+
+// Copy and Download act on the photo on screen. With several photos,
+// "Download all" becomes the main action: the single Download steps back,
+// and phones, short on room in the dock, keep just Copy and Download all.
 export function ExportActions({
   getBlob,
   filename,
+  allItems = [],
 }: {
   getBlob: (type?: string) => Promise<Blob>;
   filename: string;
+  allItems?: ExportItem[];
 }) {
   const shareSheet = useSyncExternalStore(
     subscribeToPointer,
     prefersShareSheet,
     () => false,
   );
+  const multiple = allItems.length > 1;
   const canCopy = useSyncExternalStore(noSubscription, canCopyImages, () => false);
   const [copying, setCopying] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -127,10 +136,10 @@ export function ExportActions({
         </Button>
       )}
       <Button
-        variant="primary"
+        variant={multiple ? "secondary" : "accent"}
         onClick={onSave}
         disabled={saving}
-        className={canCopy ? "" : "col-span-2"}
+        className={multiple ? "max-sm:hidden" : canCopy ? "" : "col-span-2"}
       >
         {saving
           ? "Saving…"
@@ -140,10 +149,99 @@ export function ExportActions({
               ? "Save / Share"
               : "Download"}
       </Button>
+      {multiple && (
+        <DownloadAllButton
+          items={allItems}
+          className={canCopy ? "sm:col-span-2" : "col-span-2"}
+        />
+      )}
       {error && (
         <p
           role="alert"
-          className="col-span-2 basis-full text-sm text-red-600 dark:text-red-400"
+          className="col-span-2 basis-full text-sm text-red-400"
+        >
+          {error}
+        </p>
+      )}
+    </>
+  );
+}
+
+const ZIP_NAME = "slabs-edited.zip";
+
+// Photos pasted from the clipboard are all called image.png, so a repeated
+// name gets a number, as the browser does for its own downloads. Desktop file
+// systems ignore case, so this does too.
+function uniqueName(name: string, taken: Set<string>) {
+  const dot = name.lastIndexOf(".");
+  const stem = dot > 0 ? name.slice(0, dot) : name;
+  const ext = dot > 0 ? name.slice(dot) : "";
+  let candidate = name;
+  for (let n = 2; taken.has(candidate.toLowerCase()); n++) {
+    candidate = `${stem}-${n}${ext}`;
+  }
+  taken.add(candidate.toLowerCase());
+  return candidate;
+}
+
+// Renders the photos one after another (each full-size render needs its own
+// canvas, and phones cap how much canvas memory a page can hold at once) and
+// saves them as one .zip. Separate files don't work: a page gets one download
+// per click, and Chrome holds back the rest behind a "Download multiple
+// files" prompt that's easy to miss.
+// TODO: on phones, hand all the files to the share sheet in one go instead
+// of a zip, as Save / Share does for one photo; iOS then offers "Save N
+// Images".
+function DownloadAllButton({
+  items,
+  className = "",
+}: {
+  items: ExportItem[];
+  className?: string;
+}) {
+  const [progress, setProgress] = useState<number | null>(null);
+  const [done, setDone] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function onDownloadAll() {
+    if (progress !== null) return;
+    setError(null);
+    try {
+      const files = [];
+      const taken = new Set<string>();
+      for (const [i, item] of items.entries()) {
+        setProgress(i + 1);
+        const blob = await item.getBlob();
+        const name = `${item.filename}.${EXTENSIONS[blob.type] ?? "png"}`;
+        files.push({ name: uniqueName(name, taken), input: blob });
+      }
+      saveBlob(await downloadZip(files).blob(), ZIP_NAME);
+      flash(setDone);
+    } catch {
+      setError("Couldn't save every photo. Try them one at a time.");
+    } finally {
+      setProgress(null);
+    }
+  }
+
+  return (
+    <>
+      <Button
+        variant="accent"
+        onClick={onDownloadAll}
+        disabled={progress !== null}
+        className={className}
+      >
+        {progress !== null
+          ? `Saving ${progress} of ${items.length}…`
+          : done
+            ? `✓ Saved ${items.length}`
+            : `Download all ${items.length}`}
+      </Button>
+      {error && (
+        <p
+          role="alert"
+          className="col-span-2 basis-full text-sm text-red-400"
         >
           {error}
         </p>

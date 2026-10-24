@@ -1,3 +1,6 @@
+import { drawCredit } from "@/lib/credit";
+import { type Watermark, drawWatermark, loadLogo } from "@/lib/watermark";
+
 // A black box as fractions of the photo's width/height, so it is independent
 // of how large the preview renders and maps straight onto the full-size
 // export.
@@ -32,6 +35,20 @@ export function newBox(index: number): Box {
   };
 }
 
+// New photos start with two boxes across the label: one for the serial
+// number and one for the barcode, which scans back to the same number.
+// They sit side by side rather than stacked, so on a small photo one box's
+// corner controls don't land on the other's.
+export function defaultBoxes(): Box[] {
+  const w = 0.36;
+  const h = 0.08;
+  const y = 0.1;
+  return [
+    { id: nextBoxId++, x: 0.1, y, w, h },
+    { id: nextBoxId++, x: 0.54, y, w, h },
+  ];
+}
+
 export function moveBox(box: Box, dx: number, dy: number): Box {
   return {
     ...box,
@@ -57,11 +74,13 @@ export function exportType(sourceType: string) {
 
 // Re-encoding through a canvas also drops the photo's EXIF metadata,
 // including any GPS location.
-export function renderEdited(
+export async function renderEdited(
   img: HTMLImageElement,
   boxes: Box[],
   type: string,
+  watermark: Watermark | null = null,
 ): Promise<Blob> {
+  const logo = watermark ? await loadLogo(watermark) : null;
   const scale = Math.min(
     1,
     Math.sqrt(MAX_CANVAS_PIXELS / (img.naturalWidth * img.naturalHeight)),
@@ -72,9 +91,11 @@ export function renderEdited(
   canvas.width = width;
   canvas.height = height;
   const ctx = canvas.getContext("2d");
-  if (!ctx) return Promise.reject(new Error("Couldn't render image"));
+  if (!ctx) throw new Error("Couldn't render image");
 
   ctx.drawImage(img, 0, 0, width, height);
+  // Under the boxes, so a box always covers what it hides completely.
+  if (watermark) drawWatermark(ctx, width, height, watermark, logo);
   ctx.fillStyle = "#000";
   for (const box of boxes) {
     // Round outward so no anti-aliased sliver of the serial survives at the
@@ -85,6 +106,8 @@ export function renderEdited(
     const y1 = Math.ceil((box.y + box.h) * height);
     ctx.fillRect(x0, y0, x1 - x0, y1 - y0);
   }
+  // Over the boxes, so a box can't hide it.
+  drawCredit(ctx, width, height);
 
   return new Promise((resolve, reject) => {
     canvas.toBlob(
@@ -98,6 +121,39 @@ export function renderEdited(
       },
       type,
       JPEG_QUALITY,
+    );
+  });
+}
+
+export function loadImage(url: string): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => resolve(img);
+    img.onerror = () => reject(new Error("Couldn't open that photo"));
+    img.src = url;
+  });
+}
+
+const THUMBNAIL_SIZE = 96;
+
+// A small JPEG copy for the photo strip, so a phone doesn't keep several
+// full-size decoded photos in memory just to show 48px thumbnails.
+export async function makeThumbnail(url: string): Promise<string> {
+  const img = await loadImage(url);
+  const scale =
+    THUMBNAIL_SIZE / Math.min(img.naturalWidth, img.naturalHeight);
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.max(1, Math.round(img.naturalWidth * scale));
+  canvas.height = Math.max(1, Math.round(img.naturalHeight * scale));
+  canvas.getContext("2d")?.drawImage(img, 0, 0, canvas.width, canvas.height);
+  return new Promise((resolve, reject) => {
+    canvas.toBlob(
+      (blob) =>
+        blob
+          ? resolve(URL.createObjectURL(blob))
+          : reject(new Error("Couldn't make a thumbnail")),
+      "image/jpeg",
+      0.8,
     );
   });
 }

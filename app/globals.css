@@ -1,25 +1,129 @@
 @import "tailwindcss";
 
+/* Dark only.
+   TODO: when the installable-app PR lands, change its light/dark themeColor
+   and the manifest's theme_color/background_color to a single --background. */
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: #0c0c0d;
+  --panel: #121214;
+  --field: #18181b;
+  --line: rgba(255, 255, 255, 0.08);
+  --line-strong: rgba(255, 255, 255, 0.16);
+  --foreground: #ececec;
+  --muted: rgba(236, 236, 236, 0.62);
+  --faint: rgba(236, 236, 236, 0.42);
+  --accent: #e2b25a;
+  --accent-hover: #ecc06c;
+  --on-accent: #1b1406;
+  color-scheme: dark;
 }
 
 @theme inline {
   --color-background: var(--background);
+  --color-panel: var(--panel);
+  --color-field: var(--field);
+  --color-line: var(--line);
+  --color-line-strong: var(--line-strong);
   --color-foreground: var(--foreground);
+  --color-muted: var(--muted);
+  --color-faint: var(--faint);
+  --color-accent: var(--accent);
+  --color-accent-hover: var(--accent-hover);
+  --color-on-accent: var(--on-accent);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
+}
+
+/* The small uppercase label over each group of controls. */
+@utility section-label {
+  @apply font-mono text-[11px]/4 tracking-[0.08em] text-faint uppercase;
+}
+
+/* A range input drawn as a thin track filled gold up to a white knob. Set
+   --value (0–1) on the input. The browser keeps the knob inside the track, so
+   the fill stops at the knob's center rather than at --value of the width. */
+@utility slider {
+  --thumb: 22px;
+  --stop: calc(var(--thumb) / 2 + (100% - var(--thumb)) * var(--value, 0));
+  appearance: none;
+  background: transparent;
+  cursor: pointer;
+
+  @media (pointer: fine) {
+    --thumb: 16px;
+  }
+
+  &::-webkit-slider-runnable-track {
+    height: 4px;
+    border-radius: 2px;
+    background: linear-gradient(
+      to right,
+      var(--accent) var(--stop),
+      var(--line-strong) var(--stop)
+    );
+  }
+  &::-moz-range-track {
+    height: 4px;
+    border-radius: 2px;
+    background: linear-gradient(
+      to right,
+      var(--accent) var(--stop),
+      var(--line-strong) var(--stop)
+    );
+  }
+  &::-webkit-slider-thumb {
+    appearance: none;
+    width: var(--thumb);
+    height: var(--thumb);
+    margin-top: calc(2px - var(--thumb) / 2);
+    border-radius: 999px;
+    background: #fff;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
+  }
+  &::-moz-range-thumb {
+    width: var(--thumb);
+    height: var(--thumb);
+    border: 0;
+    border-radius: 999px;
+    background: #fff;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
+  }
+}
+
+/* The watermark sheet slides up from the bottom on phones and in from the
+   right on wider screens, where it's a drawer. */
+@utility sheet {
+  transition:
+    translate 200ms ease-out,
+    overlay 200ms allow-discrete,
+    display 200ms allow-discrete;
+
+  &:not([open]) {
+    translate: 0 100%;
+  }
+  @starting-style {
+    &[open] {
+      translate: 0 100%;
+    }
+  }
+
+  @media (width >= 40rem) {
+    &:not([open]) {
+      translate: 100% 0;
+    }
+    @starting-style {
+      &[open] {
+        translate: 100% 0;
+      }
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    transition: none;
+  }
 }
