@@ -94,3 +94,36 @@ body {
     box-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
   }
 }
+
+/* The watermark sheet slides up from the bottom on phones and in from the
+   right on wider screens, where it's a drawer. */
+@utility sheet {
+  transition:
+    translate 200ms ease-out,
+    overlay 200ms allow-discrete,
+    display 200ms allow-discrete;
+
+  &:not([open]) {
+    translate: 0 100%;
+  }
+  @starting-style {
+    &[open] {
+      translate: 0 100%;
+    }
+  }
+
+  @media (width >= 40rem) {
+    &:not([open]) {
+      translate: 100% 0;
+    }
+    @starting-style {
+      &[open] {
+        translate: 100% 0;
+      }
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    transition: none;
+  }
+}
