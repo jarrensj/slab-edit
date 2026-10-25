@@ -4,7 +4,6 @@ import {
   useCallback,
   useEffect,
   useEffectEvent,
-  useReducer,
   useRef,
   useState,
   useSyncExternalStore,
@@ -18,12 +17,19 @@ import {
   WatermarkSettings,
   WatermarkSheet,
 } from "@/components/WatermarkSheet";
-import { NO_HISTORY, boxHistoryReducer } from "@/lib/box-history";
+import {
+  type BoxHistory,
+  type BoxHistoryAction,
+  NO_HISTORY,
+  boxHistoryReducer,
+} from "@/lib/box-history";
 import { heicToJpeg, isHeic, isImageFile } from "@/lib/heic";
 import {
   type Box,
   defaultBoxes,
   exportType,
+  loadImage,
+  makeThumbnail,
   moveBox,
   newBox,
   renderEdited,
@@ -31,7 +37,34 @@ import {
 } from "@/lib/slab-image";
 import { type Watermark, hasWatermark, useWatermark } from "@/lib/watermark";
 
-type Photo = { url: string; name: string; type: string; file: File };
+// Each photo keeps its own boxes and undo history, so switching between
+// photos loses nothing and ⌘Z never reaches back into a different photo.
+type Photo = {
+  id: number;
+  url: string;
+  name: string;
+  // "image/heic" for a HEIC/HEIF photo until it's converted (only when the
+  // browser can't show it); then url and type are the JPEG's.
+  type: string;
+  file: File;
+  converting: boolean;
+  history: BoxHistory;
+  thumbnail: string | null;
+};
+
+let nextPhotoId = 1;
+
+function baseNameOf(name: string) {
+  return name.replace(/\.[^.]+$/, "") || "slab";
+}
+
+type Render = {
+  url: string;
+  boxes: Box[];
+  watermark: Watermark | null;
+  type: string;
+  blob: Promise<Blob>;
+};
 
 type DragState = {
   mode: "move" | "resize";
@@ -129,16 +162,10 @@ function WatermarkToggle({
 }
 
 export function SlabEditor() {
-  const [photo, setPhoto] = useState<Photo | null>(null);
+  const [photos, setPhotos] = useState<Photo[]>([]);
+  const [currentId, setCurrentId] = useState<number | null>(null);
   const [loadedUrl, setLoadedUrl] = useState<string | null>(null);
   const [failedUrl, setFailedUrl] = useState<string | null>(null);
-  const [convertingUrl, setConvertingUrl] = useState<string | null>(null);
-  // TODO: once several photos can be open at once (#21), keep a history per
-  // photo, so ⌘Z never reaches back into a different photo.
-  const [boxHistory, dispatchBoxes] = useReducer(
-    boxHistoryReducer,
-    NO_HISTORY,
-  );
   const [isDragging, setIsDragging] = useState(false);
   const [watermarkOn, setWatermarkOn] = useState(true);
   const [watermarkSheetOpen, setWatermarkSheetOpen] = useState(false);
@@ -148,17 +175,21 @@ export function SlabEditor() {
   const stageRef = useRef<HTMLDivElement>(null);
   const imgRef = useRef<HTMLImageElement>(null);
   const dragRef = useRef<DragState | null>(null);
-  const photoRef = useRef<Photo | null>(null);
+  const renderRef = useRef<Render[]>([]);
+  const photosRef = useRef<Photo[]>([]);
+  const conversionsRef = useRef(new Map<number, Promise<string>>());
   const nudgeRef = useRef<{ id: number; at: number; result: Box[] } | null>(
     null,
   );
 
+  const photo = photos.find((p) => p.id === currentId) ?? null;
+  const boxHistory = photo?.history ?? NO_HISTORY;
   const boxes = boxHistory.present;
   const canUndo = boxHistory.past.length > 0;
-
+  const multiple = photos.length > 1;
   const isLoaded = !!photo && loadedUrl === photo.url;
   const isFailed = !!photo && failedUrl === photo.url;
-  const isConverting = !!photo && convertingUrl === photo.url;
+  const isConverting = !!photo?.converting;
   const hasMark = hasWatermark(watermark);
   const activeWatermark = watermarkOn && hasMark ? watermark : null;
   // With a photo open on wider screens, the watermark settings take over the
@@ -166,23 +197,106 @@ export function SlabEditor() {
   // open in a sheet.
   const settingsInPanel = !!photo && isWide;
 
-  const ingestImageFile = useCallback((file: File) => {
-    if (!isImageFile(file)) return;
-    dragRef.current = null;
-    setPhoto({
-      url: URL.createObjectURL(file),
-      name: file.name,
-      type: isHeic(file) ? "image/heic" : file.type,
-      file,
-    });
-    dispatchBoxes({ type: "reset", boxes: defaultBoxes() });
+  // A HEIC the browser can't decode itself (anything but Safari) is converted
+  // to JPEG once, by whichever needs it first: the photo on screen, its
+  // thumbnail, or an export. Resolves to the JPEG's URL.
+  const convertHeic = useCallback((photo: Photo) => {
+    let conversion = conversionsRef.current.get(photo.id);
+    if (!conversion) {
+      const update = (changes: Partial<Photo>) =>
+        setPhotos((prev) =>
+          prev.map((p) => (p.id === photo.id ? { ...p, ...changes } : p)),
+        );
+      update({ converting: true });
+      conversion = heicToJpeg(photo.file).then(
+        (jpeg) => {
+          const url = URL.createObjectURL(jpeg);
+          if (!photosRef.current.some((p) => p.id === photo.id)) {
+            // Removed while it converted.
+            URL.revokeObjectURL(url);
+            throw new Error("Photo was removed");
+          }
+          URL.revokeObjectURL(photo.url);
+          update({ url, type: "image/jpeg", converting: false });
+          return url;
+        },
+        (error) => {
+          update({ converting: false });
+          throw error;
+        },
+      );
+      conversionsRef.current.set(photo.id, conversion);
+    }
+    return conversion;
   }, []);
 
+  // New photos join the set (dropping more mid-edit keeps the work so far)
+  // and the first of them goes on screen.
+  const ingestImageFiles = useCallback(
+    (files: File[]) => {
+      const added: Photo[] = files.filter(isImageFile).map((file) => ({
+        id: nextPhotoId++,
+        url: URL.createObjectURL(file),
+        name: file.name,
+        type: isHeic(file) ? "image/heic" : file.type,
+        file,
+        converting: false,
+        history: boxHistoryReducer(NO_HISTORY, {
+          type: "reset",
+          boxes: defaultBoxes(),
+        }),
+        thumbnail: null,
+      }));
+      if (!added.length) return;
+      dragRef.current = null;
+      setPhotos((prev) => [...prev, ...added]);
+      setCurrentId(added[0].id);
+      // One at a time, so a phone only decodes one full-size photo at once.
+      void (async () => {
+        for (const newPhoto of added) {
+          const { id } = newPhoto;
+          try {
+            let thumbnail: string;
+            try {
+              thumbnail = await makeThumbnail(newPhoto.url);
+            } catch (error) {
+              const stillThere = photosRef.current.some((p) => p.id === id);
+              if (newPhoto.type !== "image/heic" || !stillThere) throw error;
+              // Converting here also readies photos that are never opened
+              // for Download all.
+              thumbnail = await makeThumbnail(await convertHeic(newPhoto));
+            }
+            if (!photosRef.current.some((p) => p.id === id)) {
+              URL.revokeObjectURL(thumbnail);
+              continue;
+            }
+            setPhotos((prev) =>
+              prev.map((p) => (p.id === id ? { ...p, thumbnail } : p)),
+            );
+          } catch {
+            // The strip shows an empty tile; the photo itself reports errors.
+          }
+        }
+      })();
+    },
+    [convertHeic],
+  );
+
   useEffect(() => {
-    photoRef.current = photo;
-    if (!photo) return;
-    return () => URL.revokeObjectURL(photo.url);
-  }, [photo]);
+    photosRef.current = photos;
+  }, [photos]);
+
+  // Removing a photo frees its memory right away; this frees the rest when
+  // the editor goes away.
+  useEffect(
+    () => () => {
+      for (const p of photosRef.current) {
+        URL.revokeObjectURL(p.url);
+        if (p.thumbnail) URL.revokeObjectURL(p.thumbnail);
+      }
+    },
+    [],
+  );
 
   useEffect(() => {
     function onPaste(e: ClipboardEvent) {
@@ -194,21 +308,17 @@ export function SlabEditor() {
       ) {
         return;
       }
-      const items = e.clipboardData?.items;
-      if (!items) return;
-      for (const item of items) {
-        if (item.kind === "file") {
-          const file = item.getAsFile();
-          if (!file || !isImageFile(file)) continue;
-          e.preventDefault();
-          ingestImageFile(file);
-          return;
-        }
-      }
+      const files = Array.from(e.clipboardData?.items ?? [])
+        .filter((item) => item.kind === "file")
+        .map((item) => item.getAsFile())
+        .filter((file): file is File => !!file && isImageFile(file));
+      if (!files.length) return;
+      e.preventDefault();
+      ingestImageFiles(files);
     }
     window.addEventListener("paste", onPaste);
     return () => window.removeEventListener("paste", onPaste);
-  }, [ingestImageFile]);
+  }, [ingestImageFiles]);
 
   useEffect(() => {
     let dragDepth = 0;
@@ -236,9 +346,7 @@ export function SlabEditor() {
       e.preventDefault();
       dragDepth = 0;
       setIsDragging(false);
-      const files = Array.from(e.dataTransfer?.files ?? []);
-      const image = files.find(isImageFile);
-      if (image) ingestImageFile(image);
+      ingestImageFiles(Array.from(e.dataTransfer?.files ?? []));
     }
     window.addEventListener("dragenter", onDragEnter);
     window.addEventListener("dragover", onDragOver);
@@ -250,55 +358,96 @@ export function SlabEditor() {
       window.removeEventListener("dragleave", onDragLeave);
       window.removeEventListener("drop", onDrop);
     };
-  }, [ingestImageFile]);
+  }, [ingestImageFiles]);
 
-  // Copy asks for PNG; Download takes the photo's own export type.
-  // TODO: when the share-sheet PR's render cache lands, key it on
-  // activeWatermark too (it's the same object until the settings change), so
-  // Copy/Save never hand back a render with stale watermark settings.
+  // Renders are cached per (photo, boxes, watermark, type). Boxes are
+  // replaced, never mutated, and the watermark stays the same object until its
+  // settings change, so Copy/Save always get a render that matches the screen
+  // and never a stale one. The photo is matched by URL: its Photo object is
+  // replaced whenever its thumbnail arrives.
   const getEditedBlob = useCallback(
     (type?: string): Promise<Blob> => {
       const img = imgRef.current;
       if (!photo || !img || !img.naturalWidth) {
         return Promise.reject(new Error("Photo isn't loaded yet"));
       }
-      return renderEdited(
-        img,
-        boxes,
-        type ?? exportType(photo.type),
-        activeWatermark,
+      const t = type ?? exportType(photo.type);
+      const current = renderRef.current.filter(
+        (r) =>
+          r.url === photo.url &&
+          r.boxes === boxes &&
+          r.watermark === activeWatermark,
       );
+      const hit = current.find((r) => r.type === t);
+      if (hit) return hit.blob;
+      const blob = renderEdited(img, boxes, t, activeWatermark);
+      renderRef.current = [
+        ...current,
+        { url: photo.url, boxes, watermark: activeWatermark, type: t, blob },
+      ];
+      blob.catch(() => {
+        renderRef.current = renderRef.current.filter((r) => r.blob !== blob);
+      });
+      return blob;
     },
     [photo, boxes, activeWatermark],
   );
 
+  // Render ahead once the boxes settle so Save can hand the share sheet a
+  // finished file: iOS only opens it close to the tap, and encoding a
+  // full-size photo can take longer than that.
+  useEffect(() => {
+    if (!isLoaded) return;
+    const timer = setTimeout(() => {
+      getEditedBlob().catch(() => {});
+    }, 200);
+    return () => clearTimeout(timer);
+  }, [isLoaded, getEditedBlob]);
+
   // The browser gets the first try at decoding, so Safari shows HEIC
-  // natively; only when that fails is the photo converted to JPEG here.
-  async function onPhotoError(current: Photo) {
+  // natively; only when that fails is the photo converted.
+  function onPhotoError(current: Photo) {
     if (current.type !== "image/heic") {
       setFailedUrl(current.url);
       return;
     }
-    setConvertingUrl(current.url);
-    try {
-      const jpeg = await heicToJpeg(current.file);
-      // A different photo may have been picked while this one converted.
-      if (photoRef.current !== current) return;
-      setPhoto({
-        ...current,
-        url: URL.createObjectURL(jpeg),
-        type: "image/jpeg",
-      });
-    } catch {
-      setConvertingUrl(null);
-      setFailedUrl(current.url);
-    }
+    convertHeic(current).catch(() => setFailedUrl(current.url));
   }
 
   function onFileChange(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (file) ingestImageFile(file);
+    ingestImageFiles(Array.from(e.target.files ?? []));
     e.target.value = "";
+  }
+
+  function selectPhoto(id: number) {
+    dragRef.current = null;
+    setCurrentId(id);
+  }
+
+  function removePhoto(id: number) {
+    const index = photos.findIndex((p) => p.id === id);
+    const removed = photos[index];
+    if (!removed) return;
+    URL.revokeObjectURL(removed.url);
+    if (removed.thumbnail) URL.revokeObjectURL(removed.thumbnail);
+    const rest = photos.filter((p) => p.id !== id);
+    dragRef.current = null;
+    setPhotos(rest);
+    // Show the next photo, or the one before when the last was removed.
+    if (id === currentId) {
+      setCurrentId(rest[Math.min(index, rest.length - 1)]?.id ?? null);
+    }
+  }
+
+  // Box changes, and undo/redo, apply to the photo on screen.
+  function dispatchBoxes(action: BoxHistoryAction) {
+    setPhotos((prev) =>
+      prev.map((p) =>
+        p.id === currentId
+          ? { ...p, history: boxHistoryReducer(p.history, action) }
+          : p,
+      ),
+    );
   }
 
   function addBox() {
@@ -426,6 +575,7 @@ export function SlabEditor() {
       ref={fileInputRef}
       type="file"
       accept="image/*"
+      multiple
       className="hidden"
       onChange={onFileChange}
     />
@@ -464,19 +614,19 @@ export function SlabEditor() {
               }`}
             >
               <span className="hidden text-[17px]/6 font-medium pointer-coarse:inline">
-                Tap to choose a slab photo
+                Tap to choose slab photos
               </span>
               <span className="hidden text-sm text-muted pointer-coarse:inline">
                 From your camera roll or files
               </span>
               <span className="text-lg/6.5 font-medium pointer-coarse:hidden">
-                {isDragging ? "Drop it here" : "Drop a slab photo here"}
+                {isDragging ? "Drop them here" : "Drop slab photos here"}
               </span>
               <span className="text-sm text-muted pointer-coarse:hidden">
-                or paste it with ⌘V / Ctrl+V
+                or paste one with ⌘V / Ctrl+V
               </span>
               <span className={`mt-3 sm:mt-2.5 ${buttonClass()}`}>
-                Choose a photo
+                Choose photos
               </span>
             </button>
             <div className="flex min-h-11 max-w-full items-center gap-2.5 sm:min-h-8">
@@ -506,7 +656,23 @@ export function SlabEditor() {
     );
   }
 
-  const baseName = photo.name.replace(/\.[^.]+$/, "") || "slab";
+  const index = photos.indexOf(photo);
+  // Every photo with its own boxes, rendered only when "Download all" asks.
+  // A HEIC the strip hasn't converted yet is converted here, if the browser
+  // can't open it.
+  const exportItems = photos.map((p) => ({
+    filename: `${baseNameOf(p.name)}-edited`,
+    getBlob: async () =>
+      renderEdited(
+        await loadImage(p.url).catch((error) => {
+          if (p.type !== "image/heic") throw error;
+          return convertHeic(p).then(loadImage);
+        }),
+        p.history.present,
+        exportType(p.type),
+        activeWatermark,
+      ),
+  }));
 
   return (
     <div className="flex flex-1 flex-col sm:min-h-0 sm:flex-row">
@@ -534,8 +700,13 @@ export function SlabEditor() {
             onError={() => onPhotoError(photo)}
             draggable={false}
             // On wider screens, the photo fits under the header with room
-            // for the stage's padding and the file name row below it.
-            className="block max-h-[60dvh] max-w-full rounded-lg [-webkit-touch-callout:none] sm:max-h-[calc(100dvh-52px-64px-30px)]"
+            // for the stage's padding, the file name row below it, and the
+            // photo strip when there is one.
+            className={`block max-h-[60dvh] max-w-full rounded-lg [-webkit-touch-callout:none] ${
+              multiple
+                ? "sm:max-h-[calc(100dvh-52px-64px-30px-70px)]"
+                : "sm:max-h-[calc(100dvh-52px-64px-30px)]"
+            }`}
           />
           {isLoaded && activeWatermark && (
             <WatermarkLayer watermark={activeWatermark} />
@@ -587,15 +758,64 @@ export function SlabEditor() {
           {isLoaded && <CreditLayer />}
         </div>
 
-        <div className="flex h-6 max-w-full items-center gap-2 font-mono text-xs text-faint sm:h-auto">
+        {multiple && (
+          <div
+            role="group"
+            aria-label="Photos"
+            className="flex max-w-full shrink-0 gap-2 overflow-x-auto p-1"
+          >
+            {photos.map((p, i) => (
+              <button
+                key={p.id}
+                type="button"
+                onClick={() => selectPhoto(p.id)}
+                aria-label={`Photo ${i + 1}: ${p.name}`}
+                aria-current={p.id === currentId}
+                className={`size-12 shrink-0 cursor-pointer touch-manipulation overflow-hidden rounded-lg bg-field outline-offset-2 outline-sky-500 transition focus-visible:outline-2 ${
+                  p.id === currentId
+                    ? "ring-2 ring-accent"
+                    : "opacity-60 hover:opacity-100"
+                } ${p.converting ? "animate-pulse" : ""}`}
+              >
+                {p.thumbnail && (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={p.thumbnail}
+                    alt=""
+                    draggable={false}
+                    className="size-full object-cover"
+                  />
+                )}
+              </button>
+            ))}
+          </div>
+        )}
+
+        <div className="flex h-6 max-w-full items-center gap-2.5 font-mono text-xs text-faint sm:h-auto">
           <span className="truncate">{photo.name}</span>
+          {multiple && (
+            <>
+              <span aria-hidden>·</span>
+              <span className="shrink-0">
+                {index + 1} of {photos.length}
+              </span>
+            </>
+          )}
+          <span aria-hidden>·</span>
+          <button
+            type="button"
+            onClick={() => removePhoto(photo.id)}
+            className={`${LINK_CLASS} shrink-0`}
+          >
+            Remove
+          </button>
           <span aria-hidden>·</span>
           <button
             type="button"
             onClick={() => fileInputRef.current?.click()}
             className={`${LINK_CLASS} shrink-0`}
           >
-            Change photo
+            Add photos
           </button>
         </div>
 
@@ -610,7 +830,9 @@ export function SlabEditor() {
                 className="flex-1 self-stretch"
               >
                 Watermark{" "}
-                <span className="text-muted">{describeWatermark(watermark)}</span>
+                <span className="text-muted">
+                  {describeWatermark(watermark)}
+                </span>
               </WatermarkToggle>
             ) : (
               <span className="min-w-0 flex-1 truncate text-sm">
@@ -744,13 +966,15 @@ export function SlabEditor() {
                 <div className="grid grid-cols-2 gap-2">
                   <ExportActions
                     getBlob={getEditedBlob}
-                    filename={`${baseName}-edited`}
+                    filename={`${baseNameOf(photo.name)}-edited`}
+                    allItems={exportItems}
                   />
                 </div>
                 <p className="hidden text-center text-xs text-faint sm:block">
                   Saves as{" "}
                   {exportType(photo.type) === "image/jpeg" ? "JPG" : "PNG"} at
                   the original size.
+                  {multiple && " Download all puts them in one .zip."}
                 </p>
               </div>
             )}

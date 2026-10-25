@@ -124,3 +124,36 @@ export async function renderEdited(
     );
   });
 }
+
+export function loadImage(url: string): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => resolve(img);
+    img.onerror = () => reject(new Error("Couldn't open that photo"));
+    img.src = url;
+  });
+}
+
+const THUMBNAIL_SIZE = 96;
+
+// A small JPEG copy for the photo strip, so a phone doesn't keep several
+// full-size decoded photos in memory just to show 48px thumbnails.
+export async function makeThumbnail(url: string): Promise<string> {
+  const img = await loadImage(url);
+  const scale =
+    THUMBNAIL_SIZE / Math.min(img.naturalWidth, img.naturalHeight);
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.max(1, Math.round(img.naturalWidth * scale));
+  canvas.height = Math.max(1, Math.round(img.naturalHeight * scale));
+  canvas.getContext("2d")?.drawImage(img, 0, 0, canvas.width, canvas.height);
+  return new Promise((resolve, reject) => {
+    canvas.toBlob(
+      (blob) =>
+        blob
+          ? resolve(URL.createObjectURL(blob))
+          : reject(new Error("Couldn't make a thumbnail")),
+      "image/jpeg",
+      0.8,
+    );
+  });
+}
