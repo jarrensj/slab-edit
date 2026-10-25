@@ -175,6 +175,8 @@ export function SlabEditor() {
   const watermark = useWatermark();
   const isWide = useSyncExternalStore(subscribeToWidth, isWideScreen, () => false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const dropZoneRef = useRef<HTMLButtonElement>(null);
+  const focusDropZoneRef = useRef(false);
   const stageRef = useRef<HTMLDivElement>(null);
   const imgRef = useRef<HTMLImageElement>(null);
   const dragRef = useRef<DragState | null>(null);
@@ -391,7 +393,16 @@ export function SlabEditor() {
     setWatermarkOn(true);
     setWatermarkSheetOpen(false);
     setStartOverOpen(false);
+    focusDropZoneRef.current = true;
   }
+
+  // Starting over can take away whatever opened the dialog, so focus moves to
+  // the drop zone, ready for the next photos.
+  useEffect(() => {
+    if (photo || !focusDropZoneRef.current) return;
+    focusDropZoneRef.current = false;
+    dropZoneRef.current?.focus();
+  }, [photo]);
 
   // The logo goes back to the start, asking first while photos are open.
   const onHome = useEffectEvent((e: Event) => {
@@ -570,6 +581,7 @@ export function SlabEditor() {
           </div>
           <div className="flex w-full max-w-155 flex-col items-center gap-7 sm:gap-3.5">
             <button
+              ref={dropZoneRef}
               type="button"
               onClick={() => fileInputRef.current?.click()}
               className={`flex h-75 w-full cursor-pointer touch-manipulation flex-col items-center justify-center gap-2 rounded-[14px] border border-dashed outline-offset-2 outline-sky-500 transition-colors focus-visible:outline-2 sm:h-80 sm:gap-2.5 ${
@@ -924,6 +936,14 @@ export function SlabEditor() {
                   the original size.
                   {multiple && " Download all puts them in one .zip."}
                 </p>
+                {/* For when they're done: the same as tapping the logo. */}
+                <button
+                  type="button"
+                  onClick={() => setStartOverOpen(true)}
+                  className={`${LINK_CLASS} self-center text-[13px]`}
+                >
+                  Start over
+                </button>
               </div>
             )}
           </>
