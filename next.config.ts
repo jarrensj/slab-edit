@@ -1,3 +1,4 @@
+import createMDX from "@next/mdx";
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
@@ -17,4 +18,10 @@ const nextConfig: NextConfig = {
   },
 };
 
-export default nextConfig;
+// Renders the Markdown in content/ (the Terms of Service and Privacy Policy)
+// at build time.
+const withMDX = createMDX({
+  extension: /\.(md|mdx)$/,
+});
+
+export default withMDX(nextConfig);

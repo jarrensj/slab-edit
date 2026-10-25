@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 import { Analytics } from "@vercel/analytics/next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
@@ -19,8 +20,13 @@ export const metadata: Metadata = {
     "Block out the serial numbers on your slabs and/or apply a watermark to your inventory before you share.",
 };
 
+// 44px tall on phones for thumbs; a single line on wider screens.
+const FOOTER_LINK =
+  "inline-flex min-h-11 items-center underline underline-offset-2 outline-offset-2 outline-sky-500 hover:text-foreground focus-visible:outline-2 sm:min-h-0";
+
 // On wider screens the page is a fixed-height app shell: the editor's side
-// panel runs the full height under the header. Phones scroll as usual.
+// panel runs the full height between the header and the footer. Phones scroll
+// as usual.
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
     <html lang="en" className={`${geistSans.variable} ${geistMono.variable}`}>
@@ -38,9 +44,24 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
           </p>
         </header>
         {children}
+        {/* The links open in a new tab, so a photo that's being edited isn't
+            lost. */}
+        <footer className="flex shrink-0 items-center justify-center border-t border-line px-4 pt-3 pb-[env(safe-area-inset-bottom)] text-center text-xs text-faint sm:h-9 sm:py-0">
+          <p>
+            By using slab edit, you agree to the{" "}
+            <br className="sm:hidden" />
+            <Link href="/terms" target="_blank" className={FOOTER_LINK}>
+              Terms of Service
+            </Link>{" "}
+            and{" "}
+            <Link href="/privacy" target="_blank" className={FOOTER_LINK}>
+              Privacy Policy
+            </Link>
+            .
+          </p>
+        </footer>
         {/* Vercel Web Analytics: anonymous page views, no cookies. Photos are
-            never sent. TODO: once there's a Privacy Policy page, disclose
-            this there. */}
+            never sent. Covered in the Privacy Policy. */}
         <Analytics />
       </body>
     </html>

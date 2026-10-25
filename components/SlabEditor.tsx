@@ -624,13 +624,13 @@ export function SlabEditor() {
             onLoad={() => setLoadedUrl(photo.url)}
             onError={() => setFailedUrl(photo.url)}
             draggable={false}
-            // On wider screens, the photo fits under the header with room
-            // for the stage's padding, the file name row below it, and the
-            // photo strip when there is one.
+            // On wider screens, the photo fits between the header and the
+            // footer with room for the stage's padding, the file name row
+            // below it, and the photo strip when there is one.
             className={`block max-h-[60dvh] max-w-full rounded-lg [-webkit-touch-callout:none] ${
               multiple
-                ? "sm:max-h-[calc(100dvh-52px-64px-30px-70px)]"
-                : "sm:max-h-[calc(100dvh-52px-64px-30px)]"
+                ? "sm:max-h-[calc(100dvh-52px-36px-64px-30px-70px)]"
+                : "sm:max-h-[calc(100dvh-52px-36px-64px-30px)]"
             }`}
           />
           {isLoaded && activeWatermark && (

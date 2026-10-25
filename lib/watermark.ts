@@ -16,15 +16,13 @@ export const DEFAULT_WATERMARK: Watermark = {
   layout: "tiled",
 };
 
-// TODO: once there's a Privacy Policy page, mention that the watermark
-// settings are kept in this browser's localStorage (never sent anywhere).
 const STORAGE_KEY = "slab-edit.watermark";
 const CHANGE_EVENT = "slab-edit:watermark";
 // Big enough to stay sharp on a full-size export, small enough for storage.
 const MAX_LOGO_SIZE = 512;
 
 // The watermark is set once and reused for every photo, so it lives in this
-// browser's storage. It never leaves the device.
+// browser's storage. It never leaves the device, as the Privacy Policy says.
 let memoryRaw: string | null = null;
 let cachedRaw: string | null | undefined;
 let cachedValue = DEFAULT_WATERMARK;
