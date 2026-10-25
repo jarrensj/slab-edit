@@ -5,7 +5,9 @@ export type Watermark = {
   // A small PNG data URL, so it can live in storage with the rest.
   image: string | null;
   opacity: number;
-  layout: "tiled" | "corner";
+  // "tiled" is the diagonal pattern; it keeps that name so watermarks saved
+  // before there were other patterns still load.
+  layout: "tiled" | "staggered" | "corner";
 };
 
 export const MAX_WATERMARK_TEXT = 40;
@@ -46,7 +48,9 @@ function parse(raw: string | null): Watermark {
         typeof value.opacity === "number"
           ? Math.min(Math.max(value.opacity, 0.1), 1)
           : DEFAULT_WATERMARK.opacity,
-      layout: value.layout === "corner" ? "corner" : "tiled",
+      layout: ["staggered", "corner"].includes(value.layout)
+        ? value.layout
+        : "tiled",
     };
   } catch {
     return DEFAULT_WATERMARK;
@@ -192,6 +196,34 @@ export function drawWatermark(
   if (watermark.layout === "corner") {
     const pad = size * 0.7;
     stamp(width - pad - stampWidth / 2, height - pad - stampHeight / 2);
+  } else if (watermark.layout === "staggered") {
+    // A few level stamps in rows, with every other row shifted into the gaps
+    // of the rows around it: rows about five text heights apart, stamps
+    // about eleven apart across. A long stamp is shrunk to fit its place (to
+    // 60% at most, then a row holds one fewer), so none is cut off at the
+    // edges. Worked out from the photo's shape and the stamp's proportions
+    // rather than pixels (size is rounded), so the small preview and the
+    // full-size export get the same pattern.
+    const across = width / (Math.min(width, height) * 0.06);
+    const down = height / (Math.min(width, height) * 0.06);
+    const rows = Math.min(6, Math.max(2, Math.round(down / 5)));
+    const fit = (perRow: number) =>
+      Math.min(1, (across / perRow - 1) / (stampWidth / size));
+    let perRow = Math.max(1, Math.round(across / 11));
+    while (perRow > 1 && fit(perRow) < 0.6) perRow--;
+    const scale = fit(perRow);
+    const stepX = width / perRow;
+    for (let row = 0; row < rows; row++) {
+      const y = ((row + 0.5) * height) / rows;
+      const shifted = row % 2 === 1 && perRow > 1;
+      for (let i = 0; i < (shifted ? perRow - 1 : perRow); i++) {
+        ctx.save();
+        ctx.translate((i + (shifted ? 1 : 0.5)) * stepX, y);
+        ctx.scale(scale, scale);
+        stamp(0, 0);
+        ctx.restore();
+      }
+    }
   } else {
     // Repeated diagonally across the whole photo so it can't be cropped out.
     ctx.translate(width / 2, height / 2);

@@ -112,7 +112,7 @@ function describeWatermark(watermark: Watermark) {
   return watermark.image ? "logo" : `“${text}”`;
 }
 
-// E.g. "Tiled · 40%".
+// E.g. "Diagonal · 40%".
 function describeSettings(watermark: Watermark) {
   const layout = LAYOUTS.find((l) => l.value === watermark.layout)?.label;
   return `${layout} · ${Math.round(watermark.opacity * 100)}%`;

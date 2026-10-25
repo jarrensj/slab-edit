@@ -15,7 +15,8 @@ import {
 } from "@/lib/watermark";
 
 export const LAYOUTS: { value: Watermark["layout"]; label: string }[] = [
-  { value: "tiled", label: "Tiled" },
+  { value: "tiled", label: "Diagonal" },
+  { value: "staggered", label: "Staggered" },
   { value: "corner", label: "Corner" },
 ];
 
@@ -281,7 +282,7 @@ export function WatermarkSettings({
 
         <fieldset>
           <legend className="section-label mb-2">Layout</legend>
-          <div className="grid grid-cols-2 gap-0.75 rounded-[11px] border border-line bg-field p-0.75 pointer-fine:rounded-[9px]">
+          <div className="grid grid-cols-3 gap-0.75 rounded-[11px] border border-line bg-field p-0.75 pointer-fine:rounded-[9px]">
             {LAYOUTS.map(({ value, label }) => (
               <label
                 key={value}
