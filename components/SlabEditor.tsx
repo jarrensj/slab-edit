@@ -11,6 +11,8 @@ import {
 import { Button, buttonClass } from "@/components/Button";
 import { CreditLayer } from "@/components/CreditLayer";
 import { ExportActions } from "@/components/ExportActions";
+import { HOME_EVENT } from "@/components/HomeLink";
+import { StartOverDialog } from "@/components/StartOverDialog";
 import { WatermarkLayer } from "@/components/WatermarkLayer";
 import {
   LAYOUTS,
@@ -48,6 +50,11 @@ type Photo = {
 };
 
 let nextPhotoId = 1;
+
+function freePhoto(photo: Photo) {
+  URL.revokeObjectURL(photo.url);
+  if (photo.thumbnail) URL.revokeObjectURL(photo.thumbnail);
+}
 
 function baseNameOf(name: string) {
   return name.replace(/\.[^.]+$/, "") || "slab";
@@ -164,6 +171,7 @@ export function SlabEditor() {
   const [isDragging, setIsDragging] = useState(false);
   const [watermarkOn, setWatermarkOn] = useState(true);
   const [watermarkSheetOpen, setWatermarkSheetOpen] = useState(false);
+  const [startOverOpen, setStartOverOpen] = useState(false);
   const watermark = useWatermark();
   const isWide = useSyncExternalStore(subscribeToWidth, isWideScreen, () => false);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -237,10 +245,7 @@ export function SlabEditor() {
   // the editor goes away.
   useEffect(
     () => () => {
-      for (const p of photosRef.current) {
-        URL.revokeObjectURL(p.url);
-        if (p.thumbnail) URL.revokeObjectURL(p.thumbnail);
-      }
+      for (const p of photosRef.current) freePhoto(p);
     },
     [],
   );
@@ -365,8 +370,7 @@ export function SlabEditor() {
     const index = photos.findIndex((p) => p.id === id);
     const removed = photos[index];
     if (!removed) return;
-    URL.revokeObjectURL(removed.url);
-    if (removed.thumbnail) URL.revokeObjectURL(removed.thumbnail);
+    freePhoto(removed);
     const rest = photos.filter((p) => p.id !== id);
     dragRef.current = null;
     setPhotos(rest);
@@ -375,6 +379,32 @@ export function SlabEditor() {
       setCurrentId(rest[Math.min(index, rest.length - 1)]?.id ?? null);
     }
   }
+
+  // Back to the start screen, as after a reload: only the saved watermark
+  // carries over.
+  function startOver() {
+    for (const p of photos) freePhoto(p);
+    dragRef.current = null;
+    renderRef.current = [];
+    setPhotos([]);
+    setCurrentId(null);
+    setWatermarkOn(true);
+    setWatermarkSheetOpen(false);
+    setStartOverOpen(false);
+  }
+
+  // The logo goes back to the start, asking first while photos are open.
+  const onHome = useEffectEvent((e: Event) => {
+    if (!photos.length) return;
+    e.preventDefault();
+    setStartOverOpen(true);
+  });
+
+  useEffect(() => {
+    const listener = (e: Event) => onHome(e);
+    window.addEventListener(HOME_EVENT, listener);
+    return () => window.removeEventListener(HOME_EVENT, listener);
+  }, []);
 
   // Box changes, and undo/redo, apply to the photo on screen.
   function dispatchBoxes(action: BoxHistoryAction) {
@@ -901,6 +931,12 @@ export function SlabEditor() {
       </aside>
       {fileInput}
       {watermarkSheet}
+      <StartOverDialog
+        open={startOverOpen}
+        onClose={() => setStartOverOpen(false)}
+        onConfirm={startOver}
+        photoCount={photos.length}
+      />
     </div>
   );
 }
