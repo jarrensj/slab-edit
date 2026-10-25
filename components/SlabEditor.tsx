@@ -23,6 +23,7 @@ import {
   NO_HISTORY,
   boxHistoryReducer,
 } from "@/lib/box-history";
+import { heicToJpeg, isHeic, isImageFile } from "@/lib/heic";
 import {
   type Box,
   defaultBoxes,
@@ -42,7 +43,11 @@ type Photo = {
   id: number;
   url: string;
   name: string;
+  // "image/heic" for a HEIC/HEIF photo until it's converted (only when the
+  // browser can't show it); then url and type are the JPEG's.
   type: string;
+  file: File;
+  converting: boolean;
   history: BoxHistory;
   thumbnail: string | null;
 };
@@ -172,6 +177,7 @@ export function SlabEditor() {
   const dragRef = useRef<DragState | null>(null);
   const renderRef = useRef<Render[]>([]);
   const photosRef = useRef<Photo[]>([]);
+  const conversionsRef = useRef(new Map<number, Promise<string>>());
   const nudgeRef = useRef<{ id: number; at: number; result: Box[] } | null>(
     null,
   );
@@ -183,6 +189,7 @@ export function SlabEditor() {
   const multiple = photos.length > 1;
   const isLoaded = !!photo && loadedUrl === photo.url;
   const isFailed = !!photo && failedUrl === photo.url;
+  const isConverting = !!photo?.converting;
   const hasMark = hasWatermark(watermark);
   const activeWatermark = watermarkOn && hasMark ? watermark : null;
   // With a photo open on wider screens, the watermark settings take over the
@@ -190,44 +197,90 @@ export function SlabEditor() {
   // open in a sheet.
   const settingsInPanel = !!photo && isWide;
 
+  // A HEIC the browser can't decode itself (anything but Safari) is converted
+  // to JPEG once, by whichever needs it first: the photo on screen, its
+  // thumbnail, or an export. Resolves to the JPEG's URL.
+  const convertHeic = useCallback((photo: Photo) => {
+    let conversion = conversionsRef.current.get(photo.id);
+    if (!conversion) {
+      const update = (changes: Partial<Photo>) =>
+        setPhotos((prev) =>
+          prev.map((p) => (p.id === photo.id ? { ...p, ...changes } : p)),
+        );
+      update({ converting: true });
+      conversion = heicToJpeg(photo.file).then(
+        (jpeg) => {
+          const url = URL.createObjectURL(jpeg);
+          if (!photosRef.current.some((p) => p.id === photo.id)) {
+            // Removed while it converted.
+            URL.revokeObjectURL(url);
+            throw new Error("Photo was removed");
+          }
+          URL.revokeObjectURL(photo.url);
+          update({ url, type: "image/jpeg", converting: false });
+          return url;
+        },
+        (error) => {
+          update({ converting: false });
+          throw error;
+        },
+      );
+      conversionsRef.current.set(photo.id, conversion);
+    }
+    return conversion;
+  }, []);
+
   // New photos join the set (dropping more mid-edit keeps the work so far)
   // and the first of them goes on screen.
-  const ingestImageFiles = useCallback((files: File[]) => {
-    const added: Photo[] = files
-      .filter((file) => file.type.startsWith("image/"))
-      .map((file) => ({
+  const ingestImageFiles = useCallback(
+    (files: File[]) => {
+      const added: Photo[] = files.filter(isImageFile).map((file) => ({
         id: nextPhotoId++,
         url: URL.createObjectURL(file),
         name: file.name,
-        type: file.type,
+        type: isHeic(file) ? "image/heic" : file.type,
+        file,
+        converting: false,
         history: boxHistoryReducer(NO_HISTORY, {
           type: "reset",
           boxes: defaultBoxes(),
         }),
         thumbnail: null,
       }));
-    if (!added.length) return;
-    dragRef.current = null;
-    setPhotos((prev) => [...prev, ...added]);
-    setCurrentId(added[0].id);
-    // One at a time, so a phone only decodes one full-size photo at once.
-    void (async () => {
-      for (const { id, url } of added) {
-        try {
-          const thumbnail = await makeThumbnail(url);
-          if (!photosRef.current.some((p) => p.id === id)) {
-            URL.revokeObjectURL(thumbnail);
-            continue;
+      if (!added.length) return;
+      dragRef.current = null;
+      setPhotos((prev) => [...prev, ...added]);
+      setCurrentId(added[0].id);
+      // One at a time, so a phone only decodes one full-size photo at once.
+      void (async () => {
+        for (const newPhoto of added) {
+          const { id } = newPhoto;
+          try {
+            let thumbnail: string;
+            try {
+              thumbnail = await makeThumbnail(newPhoto.url);
+            } catch (error) {
+              const stillThere = photosRef.current.some((p) => p.id === id);
+              if (newPhoto.type !== "image/heic" || !stillThere) throw error;
+              // Converting here also readies photos that are never opened
+              // for Download all.
+              thumbnail = await makeThumbnail(await convertHeic(newPhoto));
+            }
+            if (!photosRef.current.some((p) => p.id === id)) {
+              URL.revokeObjectURL(thumbnail);
+              continue;
+            }
+            setPhotos((prev) =>
+              prev.map((p) => (p.id === id ? { ...p, thumbnail } : p)),
+            );
+          } catch {
+            // The strip shows an empty tile; the photo itself reports errors.
           }
-          setPhotos((prev) =>
-            prev.map((p) => (p.id === id ? { ...p, thumbnail } : p)),
-          );
-        } catch {
-          // The strip shows an empty tile; the photo itself reports errors.
         }
-      }
-    })();
-  }, []);
+      })();
+    },
+    [convertHeic],
+  );
 
   useEffect(() => {
     photosRef.current = photos;
@@ -258,7 +311,7 @@ export function SlabEditor() {
       const files = Array.from(e.clipboardData?.items ?? [])
         .filter((item) => item.kind === "file")
         .map((item) => item.getAsFile())
-        .filter((file): file is File => !!file?.type.startsWith("image/"));
+        .filter((file): file is File => !!file && isImageFile(file));
       if (!files.length) return;
       e.preventDefault();
       ingestImageFiles(files);
@@ -350,6 +403,16 @@ export function SlabEditor() {
     }, 200);
     return () => clearTimeout(timer);
   }, [isLoaded, getEditedBlob]);
+
+  // The browser gets the first try at decoding, so Safari shows HEIC
+  // natively; only when that fails is the photo converted.
+  function onPhotoError(current: Photo) {
+    if (current.type !== "image/heic") {
+      setFailedUrl(current.url);
+      return;
+    }
+    convertHeic(current).catch(() => setFailedUrl(current.url));
+  }
 
   function onFileChange(e: React.ChangeEvent<HTMLInputElement>) {
     ingestImageFiles(Array.from(e.target.files ?? []));
@@ -505,6 +568,8 @@ export function SlabEditor() {
     dispatchBoxes({ type: continuing ? "preview" : "change", boxes: next });
   }
 
+  // iOS hands file inputs a JPEG copy of HEIC photos unless the page
+  // explicitly accepts HEIC, so this stays image/* rather than listing .heic.
   const fileInput = (
     <input
       ref={fileInputRef}
@@ -593,14 +658,16 @@ export function SlabEditor() {
 
   const index = photos.indexOf(photo);
   // Every photo with its own boxes, rendered only when "Download all" asks.
-  // TODO: once HEIC support (#8) lands, photos in a batch that were never
-  // opened haven't been converted yet; convert them here (and for their
-  // thumbnails) so Chrome can render them.
+  // A HEIC the strip hasn't converted yet is converted here, if the browser
+  // can't open it.
   const exportItems = photos.map((p) => ({
     filename: `${baseNameOf(p.name)}-edited`,
     getBlob: async () =>
       renderEdited(
-        await loadImage(p.url),
+        await loadImage(p.url).catch((error) => {
+          if (p.type !== "image/heic") throw error;
+          return convertHeic(p).then(loadImage);
+        }),
         p.history.present,
         exportType(p.type),
         activeWatermark,
@@ -610,11 +677,19 @@ export function SlabEditor() {
   return (
     <div className="flex flex-1 flex-col sm:min-h-0 sm:flex-row">
       <div className="flex flex-1 flex-col items-center gap-2 px-4 pt-4 pb-4 sm:min-w-0 sm:justify-center sm:gap-3.5 sm:p-8">
+        {isConverting && (
+          <p
+            role="status"
+            className="flex h-48 w-full max-w-xl animate-pulse items-center justify-center rounded-lg border border-line bg-panel text-muted"
+          >
+            Converting HEIC photo…
+          </p>
+        )}
         <div
           ref={stageRef}
           className={`relative select-none ${
             isDragging ? "ring-2 ring-foreground" : ""
-          }`}
+          } ${isConverting ? "hidden" : ""}`}
         >
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
@@ -622,7 +697,7 @@ export function SlabEditor() {
             src={photo.url}
             alt="Slab photo"
             onLoad={() => setLoadedUrl(photo.url)}
-            onError={() => setFailedUrl(photo.url)}
+            onError={() => onPhotoError(photo)}
             draggable={false}
             // On wider screens, the photo fits under the header with room
             // for the stage's padding, the file name row below it, and the
@@ -700,7 +775,7 @@ export function SlabEditor() {
                   p.id === currentId
                     ? "ring-2 ring-accent"
                     : "opacity-60 hover:opacity-100"
-                }`}
+                } ${p.converting ? "animate-pulse" : ""}`}
               >
                 {p.thumbnail && (
                   // eslint-disable-next-line @next/next/no-img-element
@@ -744,38 +819,41 @@ export function SlabEditor() {
           </button>
         </div>
 
-        {/* Phones only; wider screens have this in the side panel.
-            TODO: once HEIC support lands, hide the watermark controls here
-            and in the panel while a photo converts, like the photo itself. */}
-        <div className="flex h-13 w-full items-center gap-3 rounded-xl border border-line bg-panel px-3.5 sm:hidden">
-          {hasMark ? (
-            <WatermarkToggle
-              checked={watermarkOn}
-              onChange={setWatermarkOn}
-              className="flex-1 self-stretch"
+        {/* Phones only; wider screens have this in the side panel. Hidden,
+            like the photo, while a HEIC photo converts. */}
+        {!isConverting && (
+          <div className="flex h-13 w-full items-center gap-3 rounded-xl border border-line bg-panel px-3.5 sm:hidden">
+            {hasMark ? (
+              <WatermarkToggle
+                checked={watermarkOn}
+                onChange={setWatermarkOn}
+                className="flex-1 self-stretch"
+              >
+                Watermark{" "}
+                <span className="text-muted">
+                  {describeWatermark(watermark)}
+                </span>
+              </WatermarkToggle>
+            ) : (
+              <span className="min-w-0 flex-1 truncate text-sm">
+                Watermark <span className="text-muted">None yet</span>
+              </span>
+            )}
+            <button
+              type="button"
+              onClick={editWatermark}
+              className={`${LINK_CLASS} shrink-0 text-[13px]`}
             >
-              Watermark{" "}
-              <span className="text-muted">{describeWatermark(watermark)}</span>
-            </WatermarkToggle>
-          ) : (
-            <span className="min-w-0 flex-1 truncate text-sm">
-              Watermark <span className="text-muted">None yet</span>
-            </span>
-          )}
-          <button
-            type="button"
-            onClick={editWatermark}
-            className={`${LINK_CLASS} shrink-0 text-[13px]`}
-          >
-            {hasMark ? "Edit" : "Set one up"}
-          </button>
-        </div>
+              {hasMark ? "Edit" : "Set one up"}
+            </button>
+          </div>
+        )}
 
         {isFailed ? (
           <p role="alert" className="text-center text-sm text-red-400">
             Couldn&apos;t open that photo. Try saving it as a JPG or PNG first.
           </p>
-        ) : (
+        ) : isConverting ? null : (
           <p className="mt-1 text-center text-[13px]/4.5 text-pretty text-faint sm:hidden">
             Drag the black boxes over the serial number and barcode; drag a
             corner to resize.
@@ -840,7 +918,11 @@ export function SlabEditor() {
               </p>
             </section>
 
-            <section className="hidden flex-col gap-3 border-b border-line px-5 py-4.5 sm:flex">
+            <section
+              className={`hidden flex-col gap-3 border-b border-line px-5 py-4.5 ${
+                isConverting ? "" : "sm:flex"
+              }`}
+            >
               <div className="flex items-center justify-between">
                 <h2 className="section-label">Watermark</h2>
                 <button

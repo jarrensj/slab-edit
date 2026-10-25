@@ -11,6 +11,7 @@
   "dependencies": {
     "@vercel/analytics": "^2.0.1",
     "client-zip": "2.5.0",
+    "heic-to": "1.5.2",
     "next": "16.4.2",
     "react": "19.3.0",
     "react-dom": "19.3.0"
