@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Analytics } from "@vercel/analytics/next";
 import { Geist, Geist_Mono } from "next/font/google";
+import { HomeLink } from "@/components/HomeLink";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -26,10 +27,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
     <html lang="en" className={`${geistSans.variable} ${geistMono.variable}`}>
       <body className="flex min-h-dvh flex-col text-[15px]/5.5 sm:h-dvh sm:text-sm">
         <header className="flex h-12 shrink-0 items-center justify-between border-b border-line px-4 sm:h-13 sm:px-6">
-          <div className="flex items-center gap-2.5 text-sm font-medium tracking-[-0.01em] whitespace-nowrap">
-            <span aria-hidden className="size-1.75 rounded-xs bg-accent" />
-            slab edit
-          </div>
+          <HomeLink />
           <p className="text-xs text-muted sm:text-[13px]">
             <span className="sm:hidden">On-device only</span>
             <span className="hidden sm:inline">
