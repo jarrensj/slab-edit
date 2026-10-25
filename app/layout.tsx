@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { Analytics } from "@vercel/analytics/next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 
@@ -37,6 +38,10 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
           </p>
         </header>
         {children}
+        {/* Vercel Web Analytics: anonymous page views, no cookies. Photos are
+            never sent. TODO: once there's a Privacy Policy page, disclose
+            this there. */}
+        <Analytics />
       </body>
     </html>
   );
