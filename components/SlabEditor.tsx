@@ -53,6 +53,14 @@ function baseNameOf(name: string) {
   return name.replace(/\.[^.]+$/, "") || "slab";
 }
 
+type Render = {
+  url: string;
+  boxes: Box[];
+  watermark: Watermark | null;
+  type: string;
+  blob: Promise<Blob>;
+};
+
 type DragState = {
   mode: "move" | "resize";
   id: number;
@@ -162,6 +170,7 @@ export function SlabEditor() {
   const stageRef = useRef<HTMLDivElement>(null);
   const imgRef = useRef<HTMLImageElement>(null);
   const dragRef = useRef<DragState | null>(null);
+  const renderRef = useRef<Render[]>([]);
   const photosRef = useRef<Photo[]>([]);
   const nudgeRef = useRef<{ id: number; at: number; result: Box[] } | null>(
     null,
@@ -298,25 +307,49 @@ export function SlabEditor() {
     };
   }, [ingestImageFiles]);
 
-  // Copy asks for PNG; Download takes the photo's own export type.
-  // TODO: when the share-sheet PR's render cache lands, key it on
-  // activeWatermark too (it's the same object until the settings change), so
-  // Copy/Save never hand back a render with stale watermark settings.
+  // Renders are cached per (photo, boxes, watermark, type). Boxes are
+  // replaced, never mutated, and the watermark stays the same object until its
+  // settings change, so Copy/Save always get a render that matches the screen
+  // and never a stale one. The photo is matched by URL: its Photo object is
+  // replaced whenever its thumbnail arrives.
   const getEditedBlob = useCallback(
     (type?: string): Promise<Blob> => {
       const img = imgRef.current;
       if (!photo || !img || !img.naturalWidth) {
         return Promise.reject(new Error("Photo isn't loaded yet"));
       }
-      return renderEdited(
-        img,
-        boxes,
-        type ?? exportType(photo.type),
-        activeWatermark,
+      const t = type ?? exportType(photo.type);
+      const current = renderRef.current.filter(
+        (r) =>
+          r.url === photo.url &&
+          r.boxes === boxes &&
+          r.watermark === activeWatermark,
       );
+      const hit = current.find((r) => r.type === t);
+      if (hit) return hit.blob;
+      const blob = renderEdited(img, boxes, t, activeWatermark);
+      renderRef.current = [
+        ...current,
+        { url: photo.url, boxes, watermark: activeWatermark, type: t, blob },
+      ];
+      blob.catch(() => {
+        renderRef.current = renderRef.current.filter((r) => r.blob !== blob);
+      });
+      return blob;
     },
     [photo, boxes, activeWatermark],
   );
+
+  // Render ahead once the boxes settle so Save can hand the share sheet a
+  // finished file: iOS only opens it close to the tap, and encoding a
+  // full-size photo can take longer than that.
+  useEffect(() => {
+    if (!isLoaded) return;
+    const timer = setTimeout(() => {
+      getEditedBlob().catch(() => {});
+    }, 200);
+    return () => clearTimeout(timer);
+  }, [isLoaded, getEditedBlob]);
 
   function onFileChange(e: React.ChangeEvent<HTMLInputElement>) {
     ingestImageFiles(Array.from(e.target.files ?? []));
