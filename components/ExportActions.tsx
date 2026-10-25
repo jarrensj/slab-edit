@@ -54,7 +54,12 @@ function flash(set: (value: boolean) => void) {
   setTimeout(() => set(false), 1800);
 }
 
-type ExportItem = { filename: string; getBlob: () => Promise<Blob> };
+// name is the photo's own file name, for saying which one failed.
+type ExportItem = {
+  name: string;
+  filename: string;
+  getBlob: () => Promise<Blob>;
+};
 
 // Copy and Download act on the photo on screen. With several photos,
 // "Download all" becomes the main action: the single Download steps back,
@@ -209,14 +214,30 @@ function DownloadAllButton({
     try {
       const files = [];
       const taken = new Set<string>();
+      // A photo that won't render is left out, rather than losing the whole
+      // .zip over it, and named afterwards.
+      const skipped: string[] = [];
       for (const [i, item] of items.entries()) {
         setProgress(i + 1);
-        const blob = await item.getBlob();
+        let blob: Blob;
+        try {
+          blob = await item.getBlob();
+        } catch {
+          skipped.push(item.name);
+          continue;
+        }
         const name = `${item.filename}.${EXTENSIONS[blob.type] ?? "png"}`;
         files.push({ name: uniqueName(name, taken), input: blob });
       }
+      if (!files.length) throw new Error("No photos rendered");
       saveBlob(await downloadZip(files).blob(), ZIP_NAME);
-      flash(setDone);
+      if (skipped.length) {
+        setError(
+          `Saved ${files.length} of ${items.length}. Couldn't open ${skipped.join(", ")}.`,
+        );
+      } else {
+        flash(setDone);
+      }
     } catch {
       setError("Couldn't save every photo. Try them one at a time.");
     } finally {

@@ -45,9 +45,18 @@ type Photo = {
   type: string;
   history: BoxHistory;
   thumbnail: string | null;
+  // The browser couldn't decode it: a corrupt file, or a format it doesn't
+  // read (HEIC outside Safari).
+  failed: boolean;
 };
 
 let nextPhotoId = 1;
+
+// For setPhotos: marks a photo the browser couldn't open.
+function markFailed(id: number) {
+  return (photos: Photo[]) =>
+    photos.map((p) => (p.id === id ? { ...p, failed: true } : p));
+}
 
 function baseNameOf(name: string) {
   return name.replace(/\.[^.]+$/, "") || "slab";
@@ -160,7 +169,6 @@ export function SlabEditor() {
   const [photos, setPhotos] = useState<Photo[]>([]);
   const [currentId, setCurrentId] = useState<number | null>(null);
   const [loadedUrl, setLoadedUrl] = useState<string | null>(null);
-  const [failedUrl, setFailedUrl] = useState<string | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [watermarkOn, setWatermarkOn] = useState(true);
   const [watermarkSheetOpen, setWatermarkSheetOpen] = useState(false);
@@ -182,7 +190,7 @@ export function SlabEditor() {
   const canUndo = boxHistory.past.length > 0;
   const multiple = photos.length > 1;
   const isLoaded = !!photo && loadedUrl === photo.url;
-  const isFailed = !!photo && failedUrl === photo.url;
+  const isFailed = !!photo?.failed;
   const hasMark = hasWatermark(watermark);
   const activeWatermark = watermarkOn && hasMark ? watermark : null;
   // With a photo open on wider screens, the watermark settings take over the
@@ -205,6 +213,7 @@ export function SlabEditor() {
           boxes: defaultBoxes(),
         }),
         thumbnail: null,
+        failed: false,
       }));
     if (!added.length) return;
     dragRef.current = null;
@@ -223,7 +232,11 @@ export function SlabEditor() {
             prev.map((p) => (p.id === id ? { ...p, thumbnail } : p)),
           );
         } catch {
-          // The strip shows an empty tile; the photo itself reports errors.
+          // It can't be decoded, so it's marked before it's ever opened: its
+          // tile says so, and Download all leaves it out.
+          // TODO: once HEIC support (#8) lands, convert HEIC photos before
+          // their thumbnail, so Chrome doesn't mark them failed here.
+          setPhotos(markFailed(id));
         }
       }
     })();
@@ -596,16 +609,19 @@ export function SlabEditor() {
   // TODO: once HEIC support (#8) lands, photos in a batch that were never
   // opened haven't been converted yet; convert them here (and for their
   // thumbnails) so Chrome can render them.
-  const exportItems = photos.map((p) => ({
-    filename: `${baseNameOf(p.name)}-edited`,
-    getBlob: async () =>
-      renderEdited(
-        await loadImage(p.url),
-        p.history.present,
-        exportType(p.type),
-        activeWatermark,
-      ),
-  }));
+  const exportItems = photos
+    .filter((p) => !p.failed)
+    .map((p) => ({
+      name: p.name,
+      filename: `${baseNameOf(p.name)}-edited`,
+      getBlob: async () =>
+        renderEdited(
+          await loadImage(p.url),
+          p.history.present,
+          exportType(p.type),
+          activeWatermark,
+        ),
+    }));
 
   return (
     <div className="flex flex-1 flex-col sm:min-h-0 sm:flex-row">
@@ -616,23 +632,47 @@ export function SlabEditor() {
             isDragging ? "ring-2 ring-foreground" : ""
           }`}
         >
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            ref={imgRef}
-            src={photo.url}
-            alt="Slab photo"
-            onLoad={() => setLoadedUrl(photo.url)}
-            onError={() => setFailedUrl(photo.url)}
-            draggable={false}
-            // On wider screens, the photo fits under the header with room
-            // for the stage's padding, the file name row below it, and the
-            // photo strip when there is one.
-            className={`block max-h-[60dvh] max-w-full rounded-lg [-webkit-touch-callout:none] ${
-              multiple
-                ? "sm:max-h-[calc(100dvh-52px-64px-30px-70px)]"
-                : "sm:max-h-[calc(100dvh-52px-64px-30px)]"
-            }`}
-          />
+          {isFailed ? (
+            <div
+              role="alert"
+              className="flex w-72 flex-col items-center gap-4 rounded-lg border border-line bg-panel px-6 py-10 text-center sm:w-80"
+            >
+              <span
+                aria-hidden
+                className="flex size-10 items-center justify-center rounded-full bg-red-400/10 text-lg font-semibold text-red-400"
+              >
+                !
+              </span>
+              <div className="flex flex-col gap-1">
+                <p className="font-medium">Couldn&apos;t open this photo</p>
+                <p className="text-[13px]/4.5 text-pretty text-muted">
+                  Try saving it as a JPG or PNG first.
+                  {multiple && " Download all leaves it out."}
+                </p>
+              </div>
+              <Button onClick={() => removePhoto(photo.id)}>
+                Remove photo
+              </Button>
+            </div>
+          ) : (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              ref={imgRef}
+              src={photo.url}
+              alt="Slab photo"
+              onLoad={() => setLoadedUrl(photo.url)}
+              onError={() => setPhotos(markFailed(photo.id))}
+              draggable={false}
+              // On wider screens, the photo fits under the header with room
+              // for the stage's padding, the file name row below it, and the
+              // photo strip when there is one.
+              className={`block max-h-[60dvh] max-w-full rounded-lg [-webkit-touch-callout:none] ${
+                multiple
+                  ? "sm:max-h-[calc(100dvh-52px-64px-30px-70px)]"
+                  : "sm:max-h-[calc(100dvh-52px-64px-30px)]"
+              }`}
+            />
+          )}
           {isLoaded && activeWatermark && (
             <WatermarkLayer watermark={activeWatermark} />
           )}
@@ -694,7 +734,9 @@ export function SlabEditor() {
                 key={p.id}
                 type="button"
                 onClick={() => selectPhoto(p.id)}
-                aria-label={`Photo ${i + 1}: ${p.name}`}
+                aria-label={`Photo ${i + 1}: ${p.name}${
+                  p.failed ? " (couldn't open)" : ""
+                }`}
                 aria-current={p.id === currentId}
                 className={`size-12 shrink-0 cursor-pointer touch-manipulation overflow-hidden rounded-lg bg-field outline-offset-2 outline-sky-500 transition focus-visible:outline-2 ${
                   p.id === currentId
@@ -702,14 +744,23 @@ export function SlabEditor() {
                     : "opacity-60 hover:opacity-100"
                 }`}
               >
-                {p.thumbnail && (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img
-                    src={p.thumbnail}
-                    alt=""
-                    draggable={false}
-                    className="size-full object-cover"
-                  />
+                {p.failed ? (
+                  <span
+                    aria-hidden
+                    className="flex size-full items-center justify-center text-base font-semibold text-red-400"
+                  >
+                    !
+                  </span>
+                ) : (
+                  p.thumbnail && (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={p.thumbnail}
+                      alt=""
+                      draggable={false}
+                      className="size-full object-cover"
+                    />
+                  )
                 )}
               </button>
             ))}
@@ -771,11 +822,7 @@ export function SlabEditor() {
           </button>
         </div>
 
-        {isFailed ? (
-          <p role="alert" className="text-center text-sm text-red-400">
-            Couldn&apos;t open that photo. Try saving it as a JPG or PNG first.
-          </p>
-        ) : (
+        {!isFailed && (
           <p className="mt-1 text-center text-[13px]/4.5 text-pretty text-faint sm:hidden">
             Drag the black boxes over the serial number and barcode; drag a
             corner to resize.
@@ -892,7 +939,8 @@ export function SlabEditor() {
                   Saves as{" "}
                   {exportType(photo.type) === "image/jpeg" ? "JPG" : "PNG"} at
                   the original size.
-                  {multiple && " Download all puts them in one .zip."}
+                  {exportItems.length > 1 &&
+                    " Download all puts them in one .zip."}
                 </p>
               </div>
             )}
